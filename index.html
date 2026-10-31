@@ -307,20 +307,20 @@ details.more .row2{margin-top:14px}
       <fieldset>
         <legend>Час друку (1 цикл)</legend>
         <div class="row2">
-          <div class="unit"><input class="inp" id="fH" type="number" inputmode="numeric" min="0" max="999" value="1" aria-label="Години друку"><span class="u">год</span></div>
-          <div class="unit"><input class="inp" id="fM" type="number" inputmode="numeric" min="0" max="59" value="43" aria-label="Хвилини друку"><span class="u">хв</span></div>
+          <div class="unit"><input class="inp" id="fH" type="number" inputmode="numeric" min="0" max="24" data-max="24" data-role="h" value="1" aria-label="Години друку"><span class="u">год</span></div>
+          <div class="unit"><input class="inp" id="fM" type="number" inputmode="numeric" min="0" max="59" data-max="59" data-role="m" value="43" aria-label="Хвилини друку"><span class="u">хв</span></div>
         </div>
       </fieldset>
       <div class="box" id="harvestBox">
         <label class="check" for="fHarvestOn"><input id="fHarvestOn" type="checkbox" checked><span class="tick"></span>Час на збір / перезапуск</label>
-        <div class="unit"><input class="inp" id="fHarvest" type="number" inputmode="numeric" min="0" max="600" value="15" aria-label="Хвилин на збір"><span class="u">хв</span></div>
+        <div class="unit"><input class="inp" id="fHarvest" type="number" inputmode="numeric" min="0" max="600" data-max="600" value="15" aria-label="Хвилин на збір"><span class="u">хв</span></div>
       </div>
       <details class="more" id="more">
         <summary>Додатково</summary>
         <div class="row2">
           <div>
             <label class="lbl" for="fParts">Деталей за цикл</label>
-            <div class="unit"><input class="inp" id="fParts" type="number" inputmode="numeric" min="1" max="9999" value="1"><span class="u">шт</span></div>
+            <div class="unit"><input class="inp" id="fParts" type="number" inputmode="numeric" min="1" max="9999" data-max="9999" value="1"><span class="u">шт</span></div>
           </div>
           <div>
             <label class="lbl" for="fDate">Дата зміни</label>
@@ -368,6 +368,22 @@ const cyclesWord = n => plural(n, 'цикл', 'цикли', 'циклів');
 const fixWord = n => plural(n, 'фіксація', 'фіксації', 'фіксацій');
 const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const int = v => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? n : 0; };
+/* Print time of one cycle: hours 0-24, minutes 0-59, never more than 24:00 in total. */
+const printMinOf = (h, m) => Math.min(Math.min(int(h), 24) * 60 + Math.min(int(m), 59), 1440);
+/* Keep number fields inside their limits while typing: digits only, capped at data-max; 24 h forces 0 min. */
+function clampField(t) {
+  if (!t || !t.matches || !t.matches('input[data-max]')) return;
+  let v = String(t.value || '').replace(/\D/g, '');
+  if (v.length > 1) v = String(parseInt(v, 10));
+  const max = Number(t.dataset.max);
+  if (v !== '' && Number(v) > max) v = String(max);
+  if (t.value !== v) t.value = v;
+  const box = t.closest('.job-grid, .row2');
+  if (!box || !t.dataset.role) return;
+  const h = box.querySelector('input[data-role="h"]'), m = box.querySelector('input[data-role="m"]');
+  if (h && m && int(h.value) >= 24 && m.value !== '0') m.value = '0';
+}
+document.addEventListener('input', e => clampField(e.target), true);
 const JOB_COLORS = ['#8b5cf6', '#4f8cff', '#e06bc4', '#f08a4b', '#3fbf6f'];
 const jobColor = i => JOB_COLORS[i % JOB_COLORS.length];
 
@@ -587,7 +603,7 @@ function readForm() {
     name: el.name.value.trim().slice(0, 60),
     shift: el.shift.value, shiftStart: null, shiftEnd: null,
     start: parseTime(el.start.value),
-    printMin: int(el.h.value) * 60 + int(el.m.value),
+    printMin: printMinOf(el.h.value, el.m.value),
     harvestOn: el.harvestOn.checked,
     harvestMin: Math.min(int(el.harvest.value), 1440),
     parts: Math.min(Math.max(int(el.parts.value), 1), 9999),
@@ -716,7 +732,7 @@ function renderResult(p, saved) {
 
 function pauseLabel(x, st) {
   if (x.kind === 'actual') return `<span class="fact">${IC.checkSm}пауза/збір ${x.pause} хв, факт${x.pause !== x.preset ? ` (норма ${x.preset})` : ''}</span>`;
-  if (st && st.x === x && st.phase === 'harvest' && st.over > 0) return `<span class="over">пауза/збір ${x.pause} хв, триває вже ${Math.floor(st.elapsed)}</span>`;
+  if (st && st.x === x && st.phase === 'harvest' && st.over > 0) return `<span class="over">пауза/збір ${x.pause} хв, триває вже ${minsDone(st.elapsed)}</span>`;
   return x.pause ? `пауза/збір ${x.pause} хв` : 'без паузи';
 }
 
@@ -854,10 +870,10 @@ function editorHTML(ed) {
       <div class="job-grid">
         ${i > 0 ? `<div><label class="lbl" for="jFrom${i}">З циклу №</label><input class="inp" id="jFrom${i}" data-k="from" type="number" inputmode="numeric" min="2" value="${esc(j.from)}" style="font-family:var(--font-num);font-weight:700"></div>` : ''}
         <div class="${i > 0 ? '' : 'wide'} half"><label class="lbl" for="jName${i}">Назва</label><input class="inp" id="jName${i}" data-k="name" type="text" maxlength="60" value="${esc(j.name)}" placeholder="${i ? 'Наприклад, Фігурка B' : 'Наприклад, Корпус'}"></div>
-        <div><label class="lbl" for="jH${i}">Друк, год</label><div class="unit"><input class="inp" id="jH${i}" data-k="h" type="number" inputmode="numeric" min="0" value="${esc(j.h)}"><span class="u">год</span></div></div>
-        <div><label class="lbl" for="jM${i}">Друк, хв</label><div class="unit"><input class="inp" id="jM${i}" data-k="m" type="number" inputmode="numeric" min="0" max="59" value="${esc(j.m)}"><span class="u">хв</span></div></div>
-        <div><label class="lbl" for="jHv${i}">Перезапуск, хв</label><div class="unit"><input class="inp" id="jHv${i}" data-k="harvest" type="number" inputmode="numeric" min="0" value="${esc(j.harvest)}"><span class="u">хв</span></div></div>
-        <div><label class="lbl" for="jP${i}">Деталей за цикл</label><div class="unit"><input class="inp" id="jP${i}" data-k="parts" type="number" inputmode="numeric" min="1" value="${esc(j.parts)}"><span class="u">шт</span></div></div>
+        <div><label class="lbl" for="jH${i}">Друк, год</label><div class="unit"><input class="inp" id="jH${i}" data-k="h" type="number" inputmode="numeric" min="0" max="24" data-max="24" data-role="h" value="${esc(j.h)}"><span class="u">год</span></div></div>
+        <div><label class="lbl" for="jM${i}">Друк, хв</label><div class="unit"><input class="inp" id="jM${i}" data-k="m" type="number" inputmode="numeric" min="0" max="59" data-max="59" data-role="m" value="${esc(j.m)}"><span class="u">хв</span></div></div>
+        <div><label class="lbl" for="jHv${i}">Перезапуск, хв</label><div class="unit"><input class="inp" id="jHv${i}" data-k="harvest" type="number" inputmode="numeric" min="0" max="600" data-max="600" value="${esc(j.harvest)}"><span class="u">хв</span></div></div>
+        <div><label class="lbl" for="jP${i}">Деталей за цикл</label><div class="unit"><input class="inp" id="jP${i}" data-k="parts" type="number" inputmode="numeric" min="1" max="9999" data-max="9999" value="${esc(j.parts)}"><span class="u">шт</span></div></div>
       </div>
     </li>`).join('');
   return `<section class="editor" id="editor" aria-label="Редагування плану">
@@ -926,7 +942,7 @@ function editorToPlan(ed, base) {
     if (i > 0 && from < 2) return err(`${label}: вкажіть номер циклу, з якого вона діє (від 2).`);
     if (seen.has(from)) return err(`Дві заміни з одного циклу №${from}. Залиште одну.`);
     seen.add(from);
-    const printMin = int(j.h) * 60 + int(j.m);
+    const printMin = printMinOf(j.h, j.m);
     if (printMin < 1) return err(`${label}: вкажіть час друку.`);
     const hv = Math.min(int(j.harvest), 1440);
     jobs.push({ from, name: String(j.name || '').trim().slice(0, 60), printMin, harvestOn: hv > 0, harvestMin: hv, parts: Math.max(1, int(j.parts) || 1) });
@@ -1415,6 +1431,7 @@ setInterval(tick, 15000);
 /* ================= start ================= */
 initTg();
 loadDraft();
+[el.h, el.m, el.harvest, el.parts].forEach(clampField);
 el.date.value = defaultDate();
 syncFormBits();
 render();
