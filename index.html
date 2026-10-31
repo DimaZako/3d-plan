@@ -164,6 +164,9 @@ details.more .row2{margin-top:14px}
 .live.is-harvest .pulse{background:var(--harvest)}
 .live.is-over .pulse{background:var(--danger)}
 .live.is-wait .pulse{background:var(--muted);animation:none}
+.live.is-soon{background:rgba(240,180,76,.1);border-color:rgba(240,180,76,.5)}
+.live.is-soon .pulse{background:var(--harvest)}
+.sound.need{border-color:var(--harvest);color:var(--harvest)}
 .live-txt{flex:1 1 220px;min-width:0;font-weight:600}
 .live-txt b{font-weight:800}
 .live-txt small{display:block;color:var(--muted);font-size:12px;font-weight:600;margin-top:2px}
@@ -510,7 +513,7 @@ const el = {
 };
 const state = {
   view: 'form', current: null, shown: null, openedFrom: 'new',
-  editing: null, fixManual: false, dateTouched: false, sig: '', phaseKey: ''
+  editing: null, fixManual: false, dateTouched: false, sig: '', phaseKey: '', alertKey: '', warned: new Set()
 };
 const caps = { share: false };
 
@@ -727,6 +730,7 @@ function renderResult(p, saved) {
       </div>
     </article>`;
   applyCaps();
+  syncWakeLock();
   syncTg();
 }
 
@@ -805,6 +809,7 @@ function liveHTML(c, st, saved) {
     main = `До старту циклу №${x.n}: <b>${minsTxt(st.left)}</b>`;
     sub = `старт о ${hhmm(x.start)}`;
   } else if (st.phase === 'print') {
+    if (st.left <= WARN_MIN) cls = 'is-soon';
     main = `Друкується цикл №${x.n} · залишилось <b>${minsTxt(st.left)}</b>`;
     sub = `завершиться о ${hhmm(x.end)}, далі пауза/збір ${x.planned} хв${x.next ? ' (вже наступна зміна)' : ''}`;
   } else {
@@ -832,7 +837,7 @@ function liveHTML(c, st, saved) {
     <div class="live-top">
       <span class="pulse" aria-hidden="true"></span>
       <div class="live-txt">${main}<small>${sub}</small></div>
-      <button type="button" class="sound" data-act="sound" aria-pressed="${soundOn}">${IC.bell}${soundOn ? 'Сигнал увімк.' : 'Сигнал вимк.'}</button>
+      ${soundBtnHTML()}
     </div>
     ${bar}${btns}
   </section>`;
@@ -990,23 +995,91 @@ function nearestOffset(timeMin, ref) {
   return best;
 }
 
-/* ================= sound ================= */
-let soundOn = false, actx = null;
-function beep(times) {
-  if (!actx) return;
+/* ================= sound & alerts ================= */
+const LS_SOUND = 'plan3d.sound.v1';
+const WARN_MIN = 5;                       // warning before the end of a print cycle, minutes
+let soundOn = lsGet(LS_SOUND, true), actx = null;
+const audioReady = () => !!(actx && actx.state === 'running');
+/* Browsers (and Telegram) start audio only after a tap on the page: the first tap anywhere unlocks it. */
+function ensureAudio() {
   try {
-    let t = actx.currentTime + 0.02;
-    for (let i = 0; i < times; i++) {
-      const o = actx.createOscillator(), g = actx.createGain();
-      o.type = 'sine'; o.frequency.value = 880;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-      o.connect(g).connect(actx.destination);
-      o.start(t); o.stop(t + 0.4);
-      t += 0.5;
-    }
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state !== 'running') actx.resume().catch(() => {});
   } catch {}
+}
+function tone(freq, t, len) {
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'sine'; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  o.connect(g).connect(actx.destination);
+  o.start(t); o.stop(t + len + 0.05);
+}
+function beep(times) {                    // cycle finished / pause over the norm
+  if (!audioReady()) return;
+  try { let t = actx.currentTime + 0.02; for (let i = 0; i < times; i++) { tone(880, t, 0.35); t += 0.5; } } catch {}
+}
+function chime() {                        // 5 minutes before the end of printing: rising two-tone, twice
+  if (!audioReady()) return;
+  try { let t = actx.currentTime + 0.02; for (let r = 0; r < 2; r++) { tone(660, t, 0.28); tone(990, t + 0.3, 0.4); t += 1.0; } } catch {}
+}
+function buzz(kind) {
+  if (typeof haptic === 'function') { haptic('note', kind || 'warning'); return; }
+  try { if (navigator.vibrate) navigator.vibrate(kind === 'success' ? 80 : [200, 100, 200]); } catch {}
+}
+function soundBtnHTML() {
+  const need = soundOn && !audioReady();
+  const label = !soundOn ? 'Сигнал вимк.' : need ? 'Увімкнути звук' : 'Сигнал увімк.';
+  return `<button type="button" class="sound${need ? ' need' : ''}" data-act="sound" aria-pressed="${soundOn}">${IC.bell}${label}</button>`;
+}
+function updateSoundBtn() {
+  const b = el.result.querySelector('.sound');
+  if (!b) return;
+  const need = soundOn && !audioReady();
+  b.className = 'sound' + (need ? ' need' : '');
+  b.setAttribute('aria-pressed', String(soundOn));
+  b.innerHTML = IC.bell + (!soundOn ? 'Сигнал вимк.' : need ? 'Увімкнути звук' : 'Сигнал увімк.');
+}
+['pointerdown', 'touchend', 'keydown'].forEach(ev => document.addEventListener(ev, () => {
+  if (soundOn && !audioReady()) { ensureAudio(); setTimeout(updateSoundBtn, 200); }
+}, { capture: true, passive: true }));
+
+/* Alerts follow the plan that is open or was last opened, whatever screen is showing. */
+function liveAlerts() {
+  const p = state.current;
+  if (!p) { state.alertKey = ''; return; }
+  const nowMin = nowMinFor(p);
+  const st = phaseAt(compute(p), nowMin, true);
+  const key = p.id + ':' + phaseKeyOf(st);
+  if (st && st.phase === 'print' && st.left > 0 && st.left <= WARN_MIN) {
+    const k = `${p.id}:${st.x.n}:${st.x.end}`;
+    if (!state.warned.has(k)) {
+      state.warned.add(k);
+      if (soundOn) chime();
+      buzz('warning');
+      toast(`Цикл №${st.x.n} закінчиться через ${minsTxt(st.left)}, о ${hhmm(st.x.end)}`);
+    }
+  }
+  const prev = state.alertKey || '';
+  if (st && prev && prev !== key && prev.startsWith(p.id + ':') && st.phase === 'harvest') {
+    if (soundOn) beep(st.over > 0 ? 1 : 3);
+    buzz('warning');
+  }
+  state.alertKey = key;
+}
+
+/* Keep the screen on while a running plan is open with the signal on, so the signal can sound. */
+let wakeLock = null;
+async function syncWakeLock() {
+  const sh = state.shown;
+  const want = soundOn && !document.hidden && state.view === 'result' && sh && sh.saved && !!sh.st;
+  try {
+    if (want && !wakeLock && navigator.wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!want && wakeLock) { const w = wakeLock; wakeLock = null; await w.release(); }
+  } catch { wakeLock = null; }
 }
 
 /* ================= exports ================= */
@@ -1150,12 +1223,14 @@ function applyCaps() {
 async function doAction(act, btn) {
   if (act === 'back') { state.view = state.openedFrom === 'history' && state.current ? 'history' : 'form'; state.editing = null; render(); window.scrollTo(0, 0); return; }
   if (act === 'sound') {
-    soundOn = !soundOn;
+    if (!soundOn) soundOn = true;
+    else if (audioReady()) soundOn = false;
+    lsSet(LS_SOUND, soundOn);
     if (soundOn) {
-      try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); await actx.resume(); beep(1); }
-      catch { soundOn = false; toast('Звук недоступний у цьому браузері'); }
+      ensureAudio();
+      setTimeout(() => { if (audioReady()) { chime(); toast('Сигнал увімкнено: за 5 хв до кінця друку і після кожного циклу'); } else toast('Звук недоступний у цьому браузері'); updateSoundBtn(); }, 250);
     }
-    rerender(); return;
+    updateSoundBtn(); syncWakeLock(); return;
   }
   if (act === 'edit') {
     state.editing = edFromPlan(state.current); rerender();
@@ -1328,6 +1403,8 @@ async function refreshCloud() {
 
 /* ================= live tick ================= */
 function tick() {
+  liveAlerts();
+  syncWakeLock();
   const sh = state.shown;
   if (!sh || el.result.hidden || state.editing || state.fixManual) return;
   const a = document.activeElement;
@@ -1335,13 +1412,7 @@ function tick() {
   const nowMin = nowMinFor(sh.p);
   let st = phaseAt(sh.c, nowMin, sh.saved);
   if (st && st.phase === 'wait' && st.left > 720) st = null;
-  const key = phaseKeyOf(st);
-  const sig = `${key}|${Math.floor(nowMin)}`;
-  if (state.phaseKey !== key && st && st.phase === 'harvest') haptic('note', 'warning');
-  if (soundOn && state.phaseKey !== key && st) {
-    if (st.phase === 'harvest' && st.over > 0) beep(1);
-    else if (st.phase === 'harvest') beep(3);
-  }
+  const sig = `${phaseKeyOf(st)}|${Math.floor(nowMin)}`;
   if (sig !== state.sig) rerender();
 }
 
@@ -1425,8 +1496,8 @@ el.history.addEventListener('click', e => {
   const op = e.target.closest('[data-open]');
   if (op) openPlan(op.dataset.open, false);
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); refreshCloud(); } });
-setInterval(tick, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); refreshCloud(); } syncWakeLock(); });
+setInterval(tick, 10000);
 
 /* ================= start ================= */
 initTg();
