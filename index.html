@@ -1,0 +1,1426 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d0f15">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="3D План">
+<meta name="description" content="Telegram Mini App: планувальник циклів 3D-друку в межах робочої зміни: старт, кінець, збір, фіксація фактичного часу, заміна фігурок.">
+<title>3D План</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Layout: print-farm shift planner. Form rail on the left, live status + shift timeline + cycle list on the right; one column with tabs on phones. */
+  --bg:#0d0f15;
+  --surface:#161922;
+  --surface-2:#1e2230;
+  --line:#2a2f40;
+  --text:#eceef5;
+  --muted:#8a90a6;
+  --accent:#8b5cf6;
+  --accent-strong:#7c3aed;
+  --accent-ink:#b69cff;
+  --accent-soft:rgba(139,92,246,.16);
+  --next:#1fc7a8;
+  --harvest:#f0b44c;
+  --danger:#ef5b5b;
+  --font-ui:"Manrope", "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
+  --font-num:"JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --r:14px;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;overscroll-behavior-y:none}
+body{background:var(--bg);color:var(--text);font:500 15px/1.5 var(--font-ui);-webkit-font-smoothing:antialiased;min-height:100%}
+button{font-family:inherit}
+:focus-visible{outline:2px solid var(--accent-ink);outline-offset:2px}
+[hidden]{display:none !important}
+body.tg .tg-dup{display:none !important}
+
+/* ---------- top bar ---------- */
+.bar{position:sticky;top:0;z-index:20;background:rgba(13,15,21,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar-in{max-width:1140px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;color:var(--accent-ink);white-space:nowrap}
+.tabs{display:flex;gap:8px}
+.tab{appearance:none;border:1px solid var(--line);background:transparent;color:var(--text);font-weight:700;font-size:14px;padding:8px 14px;border-radius:10px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;min-height:40px}
+.tab:hover{border-color:var(--accent)}
+.tab.is-active{background:var(--accent-strong);border-color:var(--accent-strong);color:#fff}
+.count{font-family:var(--font-num);font-size:12px;line-height:1;padding:3px 6px;border-radius:6px;background:var(--surface-2);color:var(--text)}
+.tab.is-active .count{background:rgba(255,255,255,.2);color:#fff}
+
+/* ---------- layout ---------- */
+.layout{max-width:1140px;margin:0 auto;padding:20px 16px 56px;display:grid;gap:20px}
+@media (min-width:900px){
+  .layout{grid-template-columns:minmax(320px,380px) minmax(0,1fr);align-items:start}
+  .col-form{position:sticky;top:78px}
+  .mob-only{display:none !important}
+}
+@media (max-width:899px){
+  body[data-view="result"] .col-form,
+  body[data-view="history"] .col-form{display:none}
+  body[data-view="form"] .col-main{display:none}
+  .desk-only{display:none !important}
+}
+
+/* ---------- forms ---------- */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:20px;display:grid;gap:18px}
+.lbl,legend{display:block;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;padding:0}
+fieldset{border:0;padding:0;margin:0;min-width:0}
+.inp{width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);font:600 16px var(--font-ui);padding:11px 14px;border-radius:12px;min-height:50px}
+.inp::placeholder{color:#5f657b}
+.inp:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+input[type="time"].inp,input[type="date"].inp{font-family:var(--font-num);font-size:18px;font-weight:700}
+select.inp{appearance:none;-webkit-appearance:none;padding-right:42px;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238a90a6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 16px center}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.unit{position:relative}
+.unit .inp{padding-right:46px;text-align:center;font-family:var(--font-num);font-size:20px;font-weight:700}
+.unit .u{position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:12px;font-weight:700;color:var(--muted);pointer-events:none}
+.with-btn{display:grid;grid-template-columns:1fr auto;gap:8px}
+.ghost{appearance:none;background:var(--surface-2);border:1px solid var(--line);color:var(--text);font-weight:700;font-size:14px;border-radius:12px;padding:0 16px;cursor:pointer;min-height:50px}
+.ghost:hover{border-color:var(--accent)}
+.box{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:grid;gap:12px}
+.box .inp{background:var(--bg)}
+.box.is-off .unit{opacity:.35}
+.check{display:flex;align-items:center;gap:12px;font-size:15px;font-weight:700;color:var(--text);cursor:pointer;margin:0;user-select:none}
+.check input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
+.check .tick{width:24px;height:24px;border-radius:7px;border:2px solid #444a5e;display:grid;place-items:center;flex:none}
+.check input:checked + .tick{background:var(--accent-strong);border-color:var(--accent-strong)}
+.check input:checked + .tick::after{content:"";width:10px;height:5px;border-left:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translateY(-1px) rotate(-45deg)}
+.check input:focus-visible + .tick{outline:2px solid var(--accent-ink);outline-offset:2px}
+details.more{border-top:1px dashed var(--line);padding-top:14px}
+details.more summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--muted)}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary::before{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:transform .15s}
+details.more[open] summary::before{transform:rotate(45deg)}
+details.more .row2{margin-top:14px}
+.form-error{margin:0;padding:10px 12px;border-radius:10px;background:rgba(239,91,91,.12);border:1px solid rgba(239,91,91,.4);color:#ffb4b4;font-size:14px;font-weight:600}
+.primary{appearance:none;width:100%;min-height:54px;border:0;border-radius:14px;background:var(--accent-strong);color:#fff;font-size:16px;font-weight:800;cursor:pointer}
+.primary:hover{background:#6d28d9}
+.primary:active{transform:translateY(1px)}
+.hint{margin:-6px 0 0;font-size:13px;color:var(--muted);text-align:center}
+
+/* ---------- result ---------- */
+.res{display:grid;gap:16px}
+.back{appearance:none;justify-self:start;background:none;border:0;color:var(--accent-ink);font-weight:700;font-size:14px;padding:4px 0;cursor:pointer}
+.res-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.res-id{min-width:0}
+.kicker{margin:0;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kicker.saved{color:var(--next)}
+.title{margin:4px 0 6px;font-size:clamp(24px,3vw,32px);line-height:1.15;font-weight:800;text-wrap:balance;overflow-wrap:anywhere}
+.meta{margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-weight:600}
+.meta .ic{display:inline-flex}
+.meta .mi{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+@media (max-width:560px){.res-head{flex-direction:column;align-items:stretch}.editbtn{justify-content:center}}
+.ic-sun{color:var(--harvest)} .ic-moon{color:#8fb4ff} .ic-custom{color:var(--accent-ink)}
+.dotsep{width:4px;height:4px;border-radius:50%;background:#4a5068}
+.editbtn{appearance:none;flex:none;display:inline-flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--line);color:var(--text);font-weight:700;font-size:14px;border-radius:12px;padding:0 14px;cursor:pointer;min-height:44px}
+.editbtn:hover{border-color:var(--accent)}
+.editbtn svg{color:var(--accent-ink)}
+.warn{margin:0;padding:12px 14px;border-radius:12px;background:rgba(240,180,76,.1);border:1px solid rgba(240,180,76,.4);color:#ffd99a;font-size:14px;font-weight:600}
+
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:640px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;min-width:0}
+.tile .k{font-size:12px;font-weight:700;color:var(--muted);line-height:1.3}
+.tile .v{font-family:var(--font-num);font-size:26px;font-weight:700;margin-top:6px;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tile .s{font-size:12px;color:var(--muted);margin-top:4px}
+.tile.accent .v{color:var(--accent-ink)}
+
+.fixstats{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;font-size:13px;font-weight:600;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.fixstats b{color:var(--text)}
+.fixstats .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.linkbtn{appearance:none;background:none;border:0;color:var(--accent-ink);font-weight:700;font-size:13px;cursor:pointer;padding:6px 2px;text-decoration:underline;text-underline-offset:3px}
+
+/* timeline */
+.tl{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.tl-head{display:flex;justify-content:space-between;gap:12px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+.tl-track{position:relative;height:38px;border-radius:9px;background:var(--surface-2);overflow:hidden}
+.tl-grid{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.05)}
+.tl-b{position:absolute;top:7px;bottom:7px;border-radius:5px;min-width:2px}
+.tl-b.is-next{background:repeating-linear-gradient(135deg,var(--next) 0 6px,rgba(31,199,168,.45) 6px 12px) !important}
+.tl-now{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--harvest);box-shadow:0 0 0 2px rgba(240,180,76,.25)}
+.tl-ticks{position:relative;height:16px;margin-top:6px;font-family:var(--font-num);font-size:11px;color:var(--muted)}
+.tl-ticks > span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
+.tl-ticks > span.first{transform:none}
+.tl-ticks > span.last{transform:translateX(-100%)}
+@media (max-width:560px){.tl-ticks .mm{display:none}}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:12px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+
+/* live status */
+.live{display:grid;gap:12px;border-radius:var(--r);padding:14px;background:rgba(139,92,246,.12);border:1px solid rgba(139,92,246,.45)}
+.live.is-harvest{background:rgba(240,180,76,.1);border-color:rgba(240,180,76,.5)}
+.live.is-over{background:rgba(239,91,91,.1);border-color:rgba(239,91,91,.55)}
+.live.is-wait{background:var(--surface);border-color:var(--line)}
+.live-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.live .pulse{width:10px;height:10px;border-radius:50%;background:var(--accent);flex:none;animation:pulse 1.6s ease-in-out infinite}
+.live.is-harvest .pulse{background:var(--harvest)}
+.live.is-over .pulse{background:var(--danger)}
+.live.is-wait .pulse{background:var(--muted);animation:none}
+.live-txt{flex:1 1 220px;min-width:0;font-weight:600}
+.live-txt b{font-weight:800}
+.live-txt small{display:block;color:var(--muted);font-size:12px;font-weight:600;margin-top:2px}
+.sound{appearance:none;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:8px 12px;font-weight:700;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.sound[aria-pressed="true"]{border-color:var(--harvest);color:var(--harvest)}
+.hbar{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.hbar i{display:block;height:100%;background:var(--harvest)}
+.live.is-over .hbar i{background:var(--danger)}
+.fix-row{display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center}
+.fixbtn{appearance:none;flex:1 1 240px;min-height:56px;border:0;border-radius:14px;background:var(--next);color:#03231d;font-size:17px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:10px}
+.fixbtn:hover{filter:brightness(1.08)}
+.fixbtn:active{transform:translateY(1px)}
+.fix-manual{display:grid;gap:4px;max-width:360px}
+.note{margin:0;font-size:12px;color:var(--muted);font-weight:600}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
+
+/* cycles */
+.cycles{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.cy{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.cy.multi{border-left:4px solid var(--jc)}
+.cy-n{width:36px;height:36px;border-radius:10px;background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font-family:var(--font-num);font-weight:700;font-size:15px}
+.cy-times{display:flex;align-items:center;gap:10px;font-family:var(--font-num);font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;flex-wrap:wrap}
+.cy-times .end{color:var(--accent-ink)}
+.cy-times sup{font-size:10px;color:var(--muted);margin-left:2px;font-weight:700}
+.arrow{position:relative;width:26px;height:2px;background:#3a4054;flex:none}
+.arrow::after{content:"";position:absolute;right:-1px;top:-3px;border-left:6px solid #3a4054;border-top:4px solid transparent;border-bottom:4px solid transparent}
+.cy-sub{font-size:13px;color:var(--muted);font-weight:600}
+.cy-sub .fact{color:var(--next);display:inline-flex;align-items:center;gap:3px}
+.cy-sub .over{color:#ff9a9a}
+.cy-side{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.chip{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:8px;white-space:nowrap;line-height:1.2}
+.chip.next{background:var(--next);color:#03231d}
+.chip.print{background:var(--accent-strong);color:#fff}
+.chip.harvest{background:var(--harvest);color:#2b1b00}
+.chip.over{background:var(--danger);color:#fff}
+.chip.done{color:var(--muted);border:1px solid var(--line)}
+.cy.is-next{border-color:rgba(31,199,168,.55);background:linear-gradient(0deg,rgba(31,199,168,.06),rgba(31,199,168,.06)),var(--surface)}
+.cy.is-next .cy-n{background:rgba(31,199,168,.16);color:var(--next)}
+.cy.is-next .end{color:var(--next)}
+.cy.is-live{border-color:var(--accent)}
+.cy.is-harv{border-color:var(--harvest)}
+.cy.is-done{opacity:.55}
+.job-div{display:flex;align-items:flex-start;gap:10px;padding:8px 4px 2px;font-size:13px;color:var(--muted);font-weight:600}
+.job-div b{color:var(--text)}
+.jd-dot{width:10px;height:10px;border-radius:3px;background:var(--jc);flex:none;margin-top:5px}
+@media (max-width:440px){
+  .cy{grid-template-columns:auto minmax(0,1fr);row-gap:8px}
+  .cy-side{grid-column:2;flex-direction:row;align-items:center;justify-content:flex-start}
+  .cy-side:empty{display:none}
+}
+
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.act{flex:1 1 auto;white-space:nowrap;min-height:46px;appearance:none;background:var(--surface-2);border:1px solid var(--line);color:var(--text);font-size:14px;font-weight:700;border-radius:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 14px}
+.act:hover{border-color:var(--accent)}
+.act svg{flex:none;color:var(--accent-ink)}
+.soft{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:28px 20px;color:var(--muted);text-align:center;font-weight:600}
+
+/* editor */
+.editor{background:var(--surface);border:1px solid var(--accent);border-radius:18px;padding:18px;display:grid;gap:16px}
+.ed-head h2{margin:0 0 2px;font-size:18px;font-weight:800}
+.ed-base{display:grid;gap:14px}
+.jobs{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.job{background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--jc);border-radius:14px;padding:14px;display:grid;gap:12px}
+.job .inp{background:var(--bg)}
+.job-head{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:32px}
+.job-tag{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--jc)}
+.job-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.job-grid .wide{grid-column:1 / -1}
+@media (min-width:1100px){.job-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.job-grid .half{grid-column:span 2}}
+.ed-actions{display:flex;gap:8px}
+.ed-actions .primary{flex:1}
+.add{justify-self:start}
+
+/* ---------- history ---------- */
+.hist{display:grid;gap:14px}
+.hist-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.hist-head h2{margin:0;font-size:24px;font-weight:800}
+.store-note{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted)}
+.hist-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.hi{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:6px 8px 6px 4px}
+.hi:hover{border-color:#3a4054}
+.hi-open{appearance:none;background:none;border:0;color:inherit;text-align:left;padding:10px 12px;border-radius:10px;cursor:pointer;display:grid;gap:4px;min-width:0}
+.hi-name{font-size:16px;font-weight:800;overflow-wrap:anywhere}
+.hi-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;font-weight:600;color:var(--muted)}
+.hi-meta .pill{display:inline-flex;align-items:center;gap:5px;color:var(--text)}
+.hi-meta .plus{color:var(--next)}
+.hi-time{font-family:var(--font-num);font-size:12px;color:#6b7188}
+.iconbtn{appearance:none;min-width:44px;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:var(--muted);cursor:pointer;display:grid;place-items:center;font-weight:800;font-size:13px;padding:0 10px}
+.iconbtn:hover{color:var(--text);border-color:var(--accent)}
+.iconbtn.del:hover{color:var(--danger);border-color:rgba(239,91,91,.5)}
+.iconbtn.armed{background:var(--danger);border-color:var(--danger);color:#fff}
+
+/* ---------- toast ---------- */
+.toast{position:fixed;left:50%;bottom:22px;z-index:50;transform:translate(-50%,16px);opacity:0;pointer-events:none;background:var(--text);color:var(--bg);font-weight:700;font-size:14px;padding:10px 16px;border-radius:12px;max-width:calc(100% - 32px);text-align:center;transition:opacity .2s,transform .2s;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+</style>
+</head>
+<body data-view="form">
+
+<header class="bar">
+  <div class="bar-in">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 20 7.2v9.6L12 21.2 4 16.8V7.2z"/><path d="M4 7.2 12 11.6 20 7.2M12 11.6v9.6"/></svg>
+      <span>3D План</span>
+    </div>
+    <nav class="tabs" aria-label="Розділи">
+      <button type="button" class="tab is-active" id="tabNew">Новий</button>
+      <button type="button" class="tab" id="tabHistory">Історія <span class="count" id="histCount" hidden></span></button>
+    </nav>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="col-form" aria-label="Новий план">
+    <form class="panel" id="planForm" novalidate autocomplete="off">
+      <div>
+        <label class="lbl" for="fName">Назва деталі</label>
+        <input class="inp" id="fName" type="text" maxlength="60" placeholder="Наприклад, Корпус">
+      </div>
+      <div>
+        <label class="lbl" for="fShift">Графік зміни</label>
+        <select class="inp" id="fShift">
+          <option value="day">Денна (08:00 – 20:00)</option>
+          <option value="night">Нічна (20:00 – 08:00)</option>
+          <option value="custom">Свій графік…</option>
+        </select>
+      </div>
+      <div class="row2" id="customShift" hidden>
+        <div><label class="lbl" for="fShiftStart">Початок зміни</label><input class="inp" id="fShiftStart" type="time" value="09:00"></div>
+        <div><label class="lbl" for="fShiftEnd">Кінець зміни</label><input class="inp" id="fShiftEnd" type="time" value="18:00"></div>
+      </div>
+      <div>
+        <label class="lbl" for="fStart">Початок друку</label>
+        <div class="with-btn">
+          <input class="inp" id="fStart" type="time" value="08:15">
+          <button type="button" class="ghost" id="btnNow">Зараз</button>
+        </div>
+      </div>
+      <fieldset>
+        <legend>Час друку (1 цикл)</legend>
+        <div class="row2">
+          <div class="unit"><input class="inp" id="fH" type="number" inputmode="numeric" min="0" max="999" value="1" aria-label="Години друку"><span class="u">год</span></div>
+          <div class="unit"><input class="inp" id="fM" type="number" inputmode="numeric" min="0" max="59" value="43" aria-label="Хвилини друку"><span class="u">хв</span></div>
+        </div>
+      </fieldset>
+      <div class="box" id="harvestBox">
+        <label class="check" for="fHarvestOn"><input id="fHarvestOn" type="checkbox" checked><span class="tick"></span>Час на збір / перезапуск</label>
+        <div class="unit"><input class="inp" id="fHarvest" type="number" inputmode="numeric" min="0" max="600" value="15" aria-label="Хвилин на збір"><span class="u">хв</span></div>
+      </div>
+      <details class="more" id="more">
+        <summary>Додатково</summary>
+        <div class="row2">
+          <div>
+            <label class="lbl" for="fParts">Деталей за цикл</label>
+            <div class="unit"><input class="inp" id="fParts" type="number" inputmode="numeric" min="1" max="9999" value="1"><span class="u">шт</span></div>
+          </div>
+          <div>
+            <label class="lbl" for="fDate">Дата зміни</label>
+            <input class="inp" id="fDate" type="date">
+          </div>
+        </div>
+      </details>
+      <p class="form-error" id="formError" role="alert" hidden></p>
+      <button type="button" class="primary tg-dup" id="btnCalc">Розрахувати</button>
+      <p class="hint desk-only tg-dup">Праворуч чернетка оновлюється одразу. Кнопка зберігає план в історію.</p>
+    </form>
+  </section>
+
+  <section class="col-main">
+    <div id="resultView"></div>
+    <div id="historyView" hidden></div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ================= helpers ================= */
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2, '0');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const parseTime = v => { if (!v) return null; const [h, m] = String(v).split(':').map(Number); return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null; };
+const hhmm = min => { const m = ((Math.floor(min) % 1440) + 1440) % 1440; return pad(Math.floor(m / 60)) + ':' + pad(m % 60); };
+const dayOff = min => Math.floor(min / 1440);
+const dur = min => { min = Math.max(0, Math.round(min)); const h = Math.floor(min / 60), m = min % 60; return h ? (m ? `${h}г ${m}хв` : `${h}г`) : `${m}хв`; };
+const minsDone = mins => (mins > 0 && mins < 1 ? '<1 хв' : minsTxt(Math.floor(mins + 1e-9)));
+const minsTxt = mins => { mins = Math.max(0, Math.ceil(mins - 1e-9)); const h = Math.floor(mins / 60), m = mins % 60; return h ? `${h} г ${pad(m)} хв` : `${m} хв`; };
+const isoDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const splitIso = iso => { const [y, m, d] = String(iso).split('-').map(Number); return { y, m, d }; };
+const validIso = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''));
+const fmtDate = iso => { const { y, m, d } = splitIso(iso); return `${pad(d)}.${pad(m)}.${y}`; };
+const fmtStamp = ms => { const d = new Date(ms); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const at = (iso, min) => { const { y, m, d } = splitIso(iso); return new Date(y, m - 1, d, 0, min).getTime(); };
+const nowMinFor = p => (Date.now() - at(p.date, 0)) / 60000;
+const plural = (n, one, few, many) => { const a = n % 10, b = n % 100; if (a === 1 && b !== 11) return one; if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return few; return many; };
+const cyclesWord = n => plural(n, 'цикл', 'цикли', 'циклів');
+const fixWord = n => plural(n, 'фіксація', 'фіксації', 'фіксацій');
+const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const int = v => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? n : 0; };
+const JOB_COLORS = ['#8b5cf6', '#4f8cff', '#e06bc4', '#f08a4b', '#3fbf6f'];
+const jobColor = i => JOB_COLORS[i % JOB_COLORS.length];
+
+const IC = {
+  sun: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
+  custom: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
+  file: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>',
+  image: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>',
+  share: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>',
+  cal: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>',
+  bell: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>',
+  check: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg>',
+  checkSm: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg>',
+  cloud: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.3 12.7 3.5 3.5 0 0 0 6.5 19z"/></svg>',
+  device: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>'
+};
+
+/* ================= plan model & calculation ================= */
+const SHIFTS = {
+  day:   { label: 'Денна зміна', start: 8 * 60,  end: 20 * 60 },
+  night: { label: 'Нічна зміна', start: 20 * 60, end: 8 * 60 }
+};
+function shiftInfo(p) {
+  if (p.shift === 'custom') return { key: 'custom', label: 'Свій графік', start: p.shiftStart, end: p.shiftEnd };
+  const key = p.shift in SHIFTS ? p.shift : 'day';
+  return { key, label: SHIFTS[key].label, start: SHIFTS[key].start, end: SHIFTS[key].end };
+}
+
+/* Figurine sets ("jobs"): each applies from cycle `from` onward. Old plans have none: build one from top-level fields. */
+function jobsOf(p) {
+  const raw = Array.isArray(p.jobs) && p.jobs.length ? p.jobs
+    : [{ from: 1, name: p.name || '', printMin: p.printMin, harvestOn: p.harvestOn, harvestMin: p.harvestMin, parts: p.parts }];
+  const byFrom = new Map();
+  raw.forEach((j, i) => {
+    const from = i === 0 ? 1 : Math.max(2, int(j.from) || 2);
+    byFrom.set(from, {
+      from, name: String(j.name || '').slice(0, 60),
+      printMin: Math.max(1, int(j.printMin)),
+      harvestOn: !!j.harvestOn, harvestMin: int(j.harvestMin),
+      parts: Math.max(1, int(j.parts) || 1)
+    });
+  });
+  return [...byFrom.values()].sort((a, b) => a.from - b.from);
+}
+/* Actual harvest-done moments: [{n, done}], done = minutes from 00:00 of the shift date. */
+function fixesOf(p) {
+  const m = new Map();
+  (Array.isArray(p.fixes) ? p.fixes : []).forEach(f => {
+    const n = Number(f.n), d = Number(f.done);
+    if (Number.isInteger(n) && n > 0 && Number.isFinite(d)) m.set(n, Math.round(d));
+  });
+  return m;
+}
+
+/* Bot rule: cycles follow each other (print + pause/harvest); the first cycle ending after the shift end goes to the next shift and the list stops.
+   Addition: the pause/harvest time is the norm the person set. When they press "Завершити перезапуск", the next cycle starts at that
+   moment and every following end time is recalculated from it, still with the set norm. Until the press, the schedule is not changed. */
+function compute(p) {
+  const sh = shiftInfo(p);
+  const s = sh.start;
+  let e = sh.end;
+  const cross = e <= s;
+  if (cross) e += 1440;
+  let t = p.start;
+  if (cross && t <= sh.end) t += 1440;
+  const jobs = jobsOf(p), fixes = fixesOf(p);
+  const lastFix = fixes.size ? Math.max(...fixes.keys()) : 0;
+  const cycles = [];
+  let cur = t, ji = 0;
+  for (let n = 1; n <= 1500; n++) {
+    while (ji + 1 < jobs.length && jobs[ji + 1].from <= n) ji++;
+    const job = jobs[ji], P = job.printMin, preset = job.harvestOn ? job.harvestMin : 0;
+    const start = cur, end = start + P, next = end > e;
+    let pause, kind, nextStart;
+    if (fixes.has(n)) {
+      const done = Math.max(fixes.get(n), start);
+      pause = Math.max(0, done - end); kind = 'actual'; nextStart = done;
+    } else {
+      pause = preset; kind = 'preset'; nextStart = end + pause;
+    }
+    cycles.push({ n, ji, job, P, start, end, pause, planned: preset, preset, kind, next });
+    if (next) break;
+    cur = nextStart;
+  }
+  const inShift = cycles.filter(c => !c.next);
+  const last = inShift.length ? inShift[inShift.length - 1] : null;
+  return {
+    sh, s, e, cross, t, jobs, cycles, inShift, last, lastFix,
+    nextCycle: cycles.find(c => c.next) || null,
+    slack: last ? e - last.end : null,
+    printTotal: inShift.reduce((a, x) => a + x.P, 0),
+    parts: inShift.reduce((a, x) => a + x.job.parts, 0),
+    anyParts: jobs.some(j => j.parts > 1),
+    fixCount: fixes.size,
+    early: t < s, late: t >= e
+  };
+}
+
+/* track = saved plan: an unconfirmed pause stays current (showing the overrun) until "Завершити перезапуск" is pressed,
+   while the shift is still running. Drafts just follow the schedule. */
+function phaseAt(c, nowMin, track) {
+  for (const x of c.cycles) {
+    if (nowMin < x.start) return { phase: 'wait', x, left: x.start - nowMin };
+    if (nowMin < x.end) return { phase: 'print', x, left: x.end - nowMin };
+    if (x.kind === 'actual') continue;
+    if (nowMin < x.end + x.pause) return { phase: 'harvest', x, left: x.end + x.pause - nowMin, over: 0, elapsed: nowMin - x.end };
+    if (track && x.n > c.lastFix && nowMin <= c.e) return { phase: 'harvest', x, left: 0, over: nowMin - (x.end + x.pause), elapsed: nowMin - x.end };
+  }
+  return null;
+}
+
+/* ================= DOM refs & state ================= */
+const el = {
+  form: $('#planForm'), name: $('#fName'), shift: $('#fShift'), customShift: $('#customShift'),
+  shiftStart: $('#fShiftStart'), shiftEnd: $('#fShiftEnd'), start: $('#fStart'), now: $('#btnNow'),
+  h: $('#fH'), m: $('#fM'), harvestOn: $('#fHarvestOn'), harvest: $('#fHarvest'), harvestBox: $('#harvestBox'),
+  parts: $('#fParts'), date: $('#fDate'), more: $('#more'), err: $('#formError'),
+  result: $('#resultView'), history: $('#historyView'),
+  tabNew: $('#tabNew'), tabHist: $('#tabHistory'), histCount: $('#histCount'), toast: $('#toast')
+};
+const state = {
+  view: 'form', current: null, shown: null, openedFrom: 'new',
+  editing: null, fixManual: false, dateTouched: false, sig: '', phaseKey: ''
+};
+const caps = { share: false };
+
+/* ================= Telegram ================= */
+const tg = (window.Telegram && window.Telegram.WebApp) || null;
+const inTG = !!(tg && (tg.initData || (tg.platform && tg.platform !== 'unknown')));
+const tgAt = v => { try { return !!(inTG && tg.isVersionAtLeast && tg.isVersionAtLeast(v)); } catch { return false; } };
+function haptic(kind, v) {
+  if (!tgAt('6.1')) return;
+  try {
+    const h = tg.HapticFeedback;
+    if (kind === 'impact') h.impactOccurred(v || 'medium');
+    else if (kind === 'note') h.notificationOccurred(v || 'success');
+    else h.selectionChanged();
+  } catch {}
+}
+/* History lives in Telegram CloudStorage: per user, same on every device; up to 1024 keys, 4096 chars per value. */
+const CS = tgAt('6.9') && tg.CloudStorage ? tg.CloudStorage : null;
+const csCall = (fn, ...args) => new Promise((res, rej) => {
+  try { CS[fn](...args, (err, val) => (err ? rej(err) : res(val))); } catch (e) { rej(e); }
+});
+function syncTg() {
+  if (!inTG) return;
+  const sh = state.shown;
+  let mode = '', text = '', color = '#7c3aed', tcolor = '#ffffff';
+  if (state.view === 'form') { mode = 'calc'; text = 'Розрахувати'; }
+  else if (state.view === 'result' && state.editing) { mode = 'save'; text = 'Зберегти зміни'; }
+  else if (state.view === 'result' && sh && sh.saved && sh.st && sh.st.phase === 'harvest') {
+    mode = 'fix';
+    const over = sh.st.over > 0;
+    text = over ? `Завершити перезапуск (+${minsDone(sh.st.over)})` : 'Завершити перезапуск';
+    color = over ? '#ef5b5b' : '#1fc7a8';
+    tcolor = over ? '#ffffff' : '#03231d';
+  }
+  state.tgMode = mode;
+  state.tgN = mode === 'fix' ? sh.st.x.n : 0;
+  try {
+    if (mode) tg.MainButton.setParams({ text, color, text_color: tcolor, is_active: true, is_visible: true });
+    else tg.MainButton.hide();
+  } catch {}
+  try { if (tgAt('6.1')) { if (state.view !== 'form' || state.editing) tg.BackButton.show(); else tg.BackButton.hide(); } } catch {}
+}
+function initTg() {
+  if (!inTG) return;
+  document.body.classList.add('tg');
+  try { tg.ready(); tg.expand(); } catch {}
+  try { if (tgAt('6.1')) { tg.setHeaderColor('#0d0f15'); tg.setBackgroundColor('#0d0f15'); } } catch {}
+  try { if (tgAt('7.10')) tg.setBottomBarColor('#0d0f15'); } catch {}
+  try { if (tgAt('7.7')) tg.disableVerticalSwipes(); } catch {}
+  try {
+    tg.MainButton.onClick(() => {
+      haptic('impact', 'medium');
+      if (state.tgMode === 'calc') calculate();
+      else if (state.tgMode === 'save') doAction('ed-save');
+      else if (state.tgMode === 'fix') doAction('fix', { dataset: { n: String(state.tgN) } });
+    });
+  } catch {}
+  try {
+    if (tgAt('6.1')) tg.BackButton.onClick(() => {
+      haptic('select');
+      if (state.editing) doAction('ed-cancel');
+      else if (state.fixManual) { state.fixManual = false; rerender(); }
+      else if (state.view === 'history') { state.view = 'form'; render(); window.scrollTo(0, 0); }
+      else doAction('back');
+    });
+  } catch {}
+  try { if (tgAt('8.0')) tg.onEvent('activated', () => { refreshCloud(); tick(); }); } catch {}
+}
+const LS_PLANS = 'plan3d.plans.v1', LS_DRAFT = 'plan3d.draft.v1';
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
+const store = { mode: CS ? 'tg' : 'local', plans: CS ? [] : lsGet(LS_PLANS, []), loading: !!CS, note: CS ? 'Зберігається в Telegram, однаково на всіх ваших пристроях' : 'Історія зберігається на цьому пристрої' };
+
+/* ================= new-plan form ================= */
+function formShiftBounds() {
+  if (el.shift.value === 'custom') {
+    const a = parseTime(el.shiftStart.value), b = parseTime(el.shiftEnd.value);
+    return a == null || b == null ? null : { start: a, end: b };
+  }
+  return SHIFTS[el.shift.value] || SHIFTS.day;
+}
+function defaultDate() {
+  const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+  const b = formShiftBounds();
+  if (b && b.end <= b.start && nowMin < b.end) { const y = new Date(now); y.setDate(y.getDate() - 1); return isoDate(y); }
+  return isoDate(now);
+}
+function readForm() {
+  const p = {
+    name: el.name.value.trim().slice(0, 60),
+    shift: el.shift.value, shiftStart: null, shiftEnd: null,
+    start: parseTime(el.start.value),
+    printMin: int(el.h.value) * 60 + int(el.m.value),
+    harvestOn: el.harvestOn.checked,
+    harvestMin: Math.min(int(el.harvest.value), 1440),
+    parts: Math.min(Math.max(int(el.parts.value), 1), 9999),
+    date: validIso(el.date.value) ? el.date.value : defaultDate()
+  };
+  let error = '';
+  if (p.shift === 'custom') {
+    p.shiftStart = parseTime(el.shiftStart.value); p.shiftEnd = parseTime(el.shiftEnd.value);
+    if (p.shiftStart == null || p.shiftEnd == null) error = 'Вкажіть початок і кінець своєї зміни.';
+  }
+  if (!error && p.start == null) error = 'Вкажіть час початку друку.';
+  if (!error && p.printMin < 1) error = 'Вкажіть час друку одного циклу: хоча б 1 хвилину.';
+  return { p, error };
+}
+function syncFormBits() {
+  el.customShift.hidden = el.shift.value !== 'custom';
+  el.harvestBox.classList.toggle('is-off', !el.harvestOn.checked);
+  el.harvest.disabled = !el.harvestOn.checked;
+}
+function saveDraft() {
+  lsSet(LS_DRAFT, { name: el.name.value, shift: el.shift.value, shiftStart: el.shiftStart.value, shiftEnd: el.shiftEnd.value,
+    start: el.start.value, h: el.h.value, m: el.m.value, harvestOn: el.harvestOn.checked, harvest: el.harvest.value, parts: el.parts.value });
+}
+function loadDraft() {
+  const d = lsGet(LS_DRAFT, null);
+  if (!d) return;
+  const set = (node, v) => { if (v != null && v !== '') node.value = v; };
+  set(el.name, d.name); if (d.shift in SHIFTS || d.shift === 'custom') el.shift.value = d.shift;
+  set(el.shiftStart, d.shiftStart); set(el.shiftEnd, d.shiftEnd); set(el.start, d.start);
+  set(el.h, d.h); set(el.m, d.m); if (typeof d.harvestOn === 'boolean') el.harvestOn.checked = d.harvestOn;
+  set(el.harvest, d.harvest); set(el.parts, d.parts);
+  if (int(d.parts) > 1) el.more.open = true;
+}
+
+/* ================= rendering ================= */
+function render() { renderView(); syncTg(); }
+function renderView() {
+  document.body.dataset.view = state.view;
+  const histTab = state.view === 'history' || (state.view === 'result' && state.openedFrom === 'history');
+  el.tabNew.classList.toggle('is-active', !histTab);
+  el.tabHist.classList.toggle('is-active', histTab);
+  el.tabNew.setAttribute('aria-pressed', String(!histTab));
+  el.tabHist.setAttribute('aria-pressed', String(histTab));
+  el.history.hidden = state.view !== 'history';
+  el.result.hidden = state.view === 'history';
+  if (state.view === 'history') { state.shown = null; renderHistory(); return; }
+  if (state.view === 'result' && state.current) { renderResult(state.current, true); return; }
+  const { p, error } = readForm();
+  if (error) { state.shown = null; el.result.innerHTML = `<div class="soft">${esc(error)}</div>`; return; }
+  renderResult(p, false);
+}
+
+function shiftIcon(key) {
+  const k = key === 'night' ? 'moon' : key === 'custom' ? 'custom' : 'sun';
+  return `<span class="ic ic-${k}">${IC[k]}</span>`;
+}
+function timeHTML(min, cls) {
+  const d = dayOff(min);
+  return `<time class="${cls || ''}">${hhmm(min)}${d > 0 ? `<sup title="наступна доба">+${d}</sup>` : ''}</time>`;
+}
+function phaseKeyOf(st) { return st ? `${st.phase}:${st.x.n}${st.over > 0 ? ':o' : ''}` : '-'; }
+
+function renderResult(p, saved) {
+  const nowMin = nowMinFor(p);
+  const c = compute(p);
+  let st = phaseAt(c, nowMin, saved);
+  if (st && st.phase === 'wait' && st.left > 720) st = null;
+  state.shown = { p, c, saved, st };
+  state.sig = `${phaseKeyOf(st)}|${Math.floor(nowMin)}`;
+  state.phaseKey = phaseKeyOf(st);
+
+  const N = c.inShift.length;
+  const multi = c.jobs.length > 1;
+  const kicker = saved
+    ? `<p class="kicker saved">Збережено · ${esc(fmtStamp(p.createdAt))}${p.updatedAt && p.updatedAt - p.createdAt > 60000 ? ` · змінено ${esc(fmtStamp(p.updatedAt).split(', ')[1])}` : ''}</p>`
+    : `<p class="kicker">Чернетка · ще не збережено</p>`;
+  const warns = [];
+  if (c.late) warns.push('Старт друку пізніше за кінець зміни: перший цикл одразу переходить у наступну зміну.');
+  else if (!N) warns.push('Жоден цикл не встигає завершитися до кінця зміни.');
+  if (c.early && !c.late) warns.push(`Старт друку раніше за початок зміни (${hhmm(c.s)}).`);
+
+  const j0 = c.jobs[0];
+  const metaTail = multi
+    ? `${c.jobs.length} ${plural(c.jobs.length, 'вид', 'види', 'видів')} фігурок`
+    : `цикл ${dur(j0.printMin)}${j0.harvestOn && j0.harvestMin ? `, збір ${j0.harvestMin} хв` : ', без збору'}`;
+
+  const tile2 = c.anyParts
+    ? `<div class="tile"><div class="k">Деталей за зміну</div><div class="v">${c.parts}</div><div class="s">за ${N} ${cyclesWord(N)}</div></div>`
+    : `<div class="tile"><div class="k">Друк за зміну</div><div class="v">${dur(c.printTotal)}</div><div class="s">${Math.round(c.printTotal / (c.e - c.s) * 100)}% часу зміни</div></div>`;
+
+  el.result.innerHTML = `
+    <article class="res">
+      <button type="button" class="back mob-only tg-dup" data-act="back">${saved && state.openedFrom === 'history' ? '← Історія' : '← Параметри'}</button>
+      <header class="res-head">
+        <div class="res-id">
+          ${kicker}
+          <h1 class="title">${esc(p.name || (j0 && j0.name) || 'Без назви')}</h1>
+          <p class="meta"><span class="mi">${shiftIcon(c.sh.key)}${esc(c.sh.label)} ${hhmm(c.s)}–${hhmm(c.e)}</span><span class="mi"><span class="dotsep"></span>${fmtDate(p.date)}</span><span class="mi"><span class="dotsep"></span>${metaTail}</span></p>
+        </div>
+        ${saved && !state.editing ? `<button type="button" class="editbtn" data-act="edit">${IC.edit}Редагувати</button>` : ''}
+      </header>
+      ${saved && state.editing ? editorHTML(state.editing) : ''}
+      ${warns.map(w => `<p class="warn">${esc(w)}</p>`).join('')}
+      ${liveHTML(c, st, saved)}
+      <div class="tiles">
+        <div class="tile accent"><div class="k">Циклів у зміні</div><div class="v">${N}</div><div class="s">${c.nextCycle ? '+1 у наступній зміні' : 'усі в межах зміни'}</div></div>
+        ${tile2}
+        <div class="tile"><div class="k">Останній цикл зміни</div><div class="v">${c.last ? hhmm(c.last.end) : '—'}</div><div class="s">${c.last ? 'кінець циклу №' + c.last.n : 'немає'}</div></div>
+        <div class="tile"><div class="k">Запас до кінця зміни</div><div class="v">${c.slack != null ? dur(c.slack) : '—'}</div><div class="s">зміна до ${hhmm(c.e)}</div></div>
+      </div>
+      ${saved ? fixStatsHTML(c) : ''}
+      ${timelineHTML(c, nowMin)}
+      <ol class="cycles">${rowsHTML(c, st)}</ol>
+      <div class="actions">
+        <button type="button" class="act" data-act="copy">${IC.copy}Копіювати текст</button>
+        <button type="button" class="act" data-act="tgshare" data-needs="tg">${IC.share}Надіслати в чат</button>
+        <button type="button" class="act" data-act="txt" data-needs="dl">${IC.file}Зберегти TXT</button>
+        <button type="button" class="act" data-act="png" data-needs="dl">${IC.image}Зберегти зображення</button>
+        <button type="button" class="act" data-act="share" data-needs="share">${IC.image}Поділитися зображенням</button>
+        <button type="button" class="act" data-act="ics" data-needs="ics">${IC.cal}У календар (.ics)</button>
+      </div>
+    </article>`;
+  applyCaps();
+  syncTg();
+}
+
+function pauseLabel(x, st) {
+  if (x.kind === 'actual') return `<span class="fact">${IC.checkSm}пауза/збір ${x.pause} хв, факт${x.pause !== x.preset ? ` (норма ${x.preset})` : ''}</span>`;
+  if (st && st.x === x && st.phase === 'harvest' && st.over > 0) return `<span class="over">пауза/збір ${x.pause} хв, триває вже ${Math.floor(st.elapsed)}</span>`;
+  return x.pause ? `пауза/збір ${x.pause} хв` : 'без паузи';
+}
+
+function rowsHTML(c, st) {
+  const multi = c.jobs.length > 1;
+  const out = [];
+  for (const x of c.cycles) {
+    if (multi && x.n === x.job.from) {
+      const j = x.job;
+      out.push(`<li class="job-div" style="--jc:${jobColor(x.ji)}"><span class="jd-dot"></span><span><b>${x.ji === 0 ? 'Фігурки' : 'Заміна фігурок'}${j.name ? ': ' + esc(j.name) : ''}</b> · з циклу №${x.n} · друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${j.parts > 1 ? ` · ${j.parts} шт` : ''}</span></li>`);
+    }
+    let cls = '', chip = '';
+    if (st) {
+      if (st.x === x) {
+        if (st.phase === 'print') { cls = ' is-live'; chip = `<span class="chip print">Друк · ${minsTxt(st.left)}</span>`; }
+        else if (st.phase === 'harvest') { cls = ' is-harv'; chip = st.over > 0 ? `<span class="chip over">Збір +${minsDone(st.over)}</span>` : `<span class="chip harvest">Збір · ${minsTxt(st.left)}</span>`; }
+        else chip = `<span class="chip done">Старт за ${minsTxt(st.left)}</span>`;
+      } else if (x.n < st.x.n) { cls = ' is-done'; chip = '<span class="chip done">Готово</span>'; }
+    }
+    const nameBit = multi && x.job.name ? `${esc(x.job.name)} · ` : '';
+    out.push(`
+      <li class="cy${x.next ? ' is-next' : ''}${multi ? ' multi' : ''}${cls}" style="--jc:${jobColor(x.ji)}">
+        <span class="cy-n">${x.n}</span>
+        <div>
+          <div class="cy-times">${timeHTML(x.start)}<span class="arrow" aria-label="до"></span>${timeHTML(x.end, 'end')}</div>
+          <div class="cy-sub">${nameBit}друк ${dur(x.P)} · ${pauseLabel(x, st)}${x.next ? ' · знімає наступна зміна' : ''}</div>
+        </div>
+        <div class="cy-side">${x.next ? '<span class="chip next">Наст. зміна</span>' : ''}${chip}</div>
+      </li>`);
+  }
+  return out.join('');
+}
+
+function timelineHTML(c, nowMin) {
+  const span = c.e - c.s;
+  const pct = m => Math.max(0, Math.min(100, (m - c.s) / span * 100));
+  const blocks = c.cycles.map(x => {
+    const l = pct(x.start), r = pct(x.end);
+    if (r - l <= 0) return '';
+    return `<span class="tl-b${x.next ? ' is-next' : ''}" style="left:${l.toFixed(3)}%;width:${(r - l).toFixed(3)}%;background:${jobColor(x.ji)}" title="Цикл №${x.n}: ${hhmm(x.start)}–${hhmm(x.end)}"></span>`;
+  }).join('');
+  const step = span <= 480 ? 60 : span <= 960 ? 120 : 240;
+  const ticks = [{ m: c.s, cls: 'first' }];
+  for (let m = Math.ceil((c.s + 1) / step) * step; m < c.e; m += step) {
+    if (m - c.s >= step * 0.45 && c.e - m >= step * 0.45) ticks.push({ m, cls: '' });
+  }
+  ticks.push({ m: c.e, cls: 'last' });
+  const tickLabel = m => { const [hh, mm] = hhmm(m).split(':'); return mm === '00' ? `${hh}<span class="mm">:00</span>` : `${hh}:${mm}`; };
+  const grid = ticks.slice(1, -1).map(t => `<span class="tl-grid" style="left:${pct(t.m).toFixed(3)}%"></span>`).join('');
+  const labels = ticks.map(t => `<span class="${t.cls}" style="left:${pct(t.m).toFixed(3)}%">${tickLabel(t.m)}</span>`).join('');
+  const nowIn = nowMin >= c.s && nowMin <= c.e;
+  const jobsLegend = c.jobs.length > 1
+    ? c.jobs.map((j, i) => `<span><i style="background:${jobColor(i)}"></i>${esc(j.name || (i ? 'заміна ' + i : 'фігурки'))}</span>`).join('')
+    : '<span><i style="background:var(--accent)"></i>друк</span>';
+  return `
+    <div class="tl">
+      <div class="tl-head"><span>Зміна ${hhmm(c.s)}–${hhmm(c.e)}</span><span>${dur(span)}</span></div>
+      <div class="tl-track">${grid}${blocks}${nowIn ? `<span class="tl-now" style="left:${pct(nowMin).toFixed(3)}%"></span>` : ''}</div>
+      <div class="tl-ticks">${labels}</div>
+      <div class="legend">${jobsLegend}<span><i style="background:var(--surface-2);border:1px solid #444a5e"></i>збір / простій</span><span><i style="background:var(--next)"></i>наступна зміна</span><span><i style="background:var(--harvest)"></i>зараз</span></div>
+    </div>`;
+}
+
+function liveHTML(c, st, saved) {
+  if (!st) return '';
+  const x = st.x;
+  let cls = '', main = '', sub = '', bar = '', btns = '';
+  if (st.phase === 'wait') {
+    cls = 'is-wait';
+    main = `До старту циклу №${x.n}: <b>${minsTxt(st.left)}</b>`;
+    sub = `старт о ${hhmm(x.start)}`;
+  } else if (st.phase === 'print') {
+    main = `Друкується цикл №${x.n} · залишилось <b>${minsTxt(st.left)}</b>`;
+    sub = `завершиться о ${hhmm(x.end)}, далі пауза/збір ${x.planned} хв${x.next ? ' (вже наступна зміна)' : ''}`;
+  } else {
+    cls = st.over > 0 ? 'is-over' : 'is-harvest';
+    main = st.over > 0
+      ? `Пауза/збір після циклу №${x.n} · понад норму <b>+${minsDone(st.over)}</b>`
+      : `Пауза/збір після циклу №${x.n} · залишилось <b>${minsTxt(st.left)}</b>`;
+    sub = `минуло ${minsDone(st.elapsed)} із ${x.planned} хв · відлік від кінця циклу о ${hhmm(x.end)}`;
+    if (saved) sub += ' · подальші цикли перерахуються від моменту натискання кнопки';
+    const pct = x.planned > 0 ? Math.min(100, st.elapsed / x.planned * 100) : 100;
+    bar = `<div class="hbar" aria-hidden="true"><i style="width:${pct.toFixed(1)}%"></i></div>`;
+    const d = new Date();
+    btns = saved
+      ? `<div class="fix-row">
+           <button type="button" class="fixbtn tg-dup" data-act="fix" data-n="${x.n}">${IC.check}Завершити перезапуск</button>
+           <button type="button" class="linkbtn" data-act="fix-manual" aria-expanded="${state.fixManual}">Вказати час вручну</button>
+         </div>
+         <div class="fix-manual" ${state.fixManual ? '' : 'hidden'}>
+           <label class="lbl" for="fixTime">Коли завершили перезапуск після циклу №${x.n}</label>
+           <div class="with-btn"><input class="inp" id="fixTime" type="time" value="${pad(d.getHours())}:${pad(d.getMinutes())}"><button type="button" class="ghost" data-act="fix-save" data-n="${x.n}">Зберегти</button></div>
+         </div>`
+      : `<p class="note">Щоб завершувати перезапуск кнопкою, збережіть план («Розрахувати»).</p>`;
+  }
+  return `<section class="live ${cls}" aria-label="Поточний стан">
+    <div class="live-top">
+      <span class="pulse" aria-hidden="true"></span>
+      <div class="live-txt">${main}<small>${sub}</small></div>
+      <button type="button" class="sound" data-act="sound" aria-pressed="${soundOn}">${IC.bell}${soundOn ? 'Сигнал увімк.' : 'Сигнал вимк.'}</button>
+    </div>
+    ${bar}${btns}
+  </section>`;
+}
+
+function fixStatsHTML(c) {
+  if (!c.fixCount) {
+    return `<p class="fixstats">Після кожної паузи/збору натискайте «Завершити перезапуск»: час завершення наступних циклів перерахується від цього моменту.</p>`;
+  }
+  const items = c.cycles.filter(x => x.kind === 'actual').map(x => {
+    const d = x.pause - x.preset;
+    return `<span>№${x.n}: <b>${x.pause} хв</b>${d ? ` (${d > 0 ? '+' : '−'}${Math.abs(d)} до норми)` : ''}</span>`;
+  }).join('');
+  return `<div class="fixstats"><span>Фактичні перезапуски:</span>${items}<button type="button" class="linkbtn" data-act="undo">Скасувати останній (№${c.lastFix})</button></div>`;
+}
+
+/* ================= editor (saved plans) ================= */
+function edFromPlan(p) {
+  return {
+    shift: p.shift in SHIFTS || p.shift === 'custom' ? p.shift : 'day',
+    shiftStart: hhmm(p.shiftStart != null ? p.shiftStart : 540),
+    shiftEnd: hhmm(p.shiftEnd != null ? p.shiftEnd : 1080),
+    date: p.date, start: hhmm(p.start),
+    jobs: jobsOf(p).map(j => ({ from: String(j.from), name: j.name, h: String(Math.floor(j.printMin / 60)), m: String(j.printMin % 60), harvest: String(j.harvestOn ? j.harvestMin : 0), parts: String(j.parts) }))
+  };
+}
+function editorHTML(ed) {
+  const opt = (v, t) => `<option value="${v}"${ed.shift === v ? ' selected' : ''}>${t}</option>`;
+  const jobs = ed.jobs.map((j, i) => `
+    <li class="job" data-j="${i}" style="--jc:${jobColor(i)}">
+      <div class="job-head">
+        <span class="job-tag">${i === 0 ? 'Фігурки з циклу №1' : 'Заміна фігурок'}</span>
+        ${i > 0 ? `<button type="button" class="iconbtn del" data-act="ed-del" data-j="${i}" aria-label="Прибрати цю заміну">${IC.trash}</button>` : ''}
+      </div>
+      <div class="job-grid">
+        ${i > 0 ? `<div><label class="lbl" for="jFrom${i}">З циклу №</label><input class="inp" id="jFrom${i}" data-k="from" type="number" inputmode="numeric" min="2" value="${esc(j.from)}" style="font-family:var(--font-num);font-weight:700"></div>` : ''}
+        <div class="${i > 0 ? '' : 'wide'} half"><label class="lbl" for="jName${i}">Назва</label><input class="inp" id="jName${i}" data-k="name" type="text" maxlength="60" value="${esc(j.name)}" placeholder="${i ? 'Наприклад, Фігурка B' : 'Наприклад, Корпус'}"></div>
+        <div><label class="lbl" for="jH${i}">Друк, год</label><div class="unit"><input class="inp" id="jH${i}" data-k="h" type="number" inputmode="numeric" min="0" value="${esc(j.h)}"><span class="u">год</span></div></div>
+        <div><label class="lbl" for="jM${i}">Друк, хв</label><div class="unit"><input class="inp" id="jM${i}" data-k="m" type="number" inputmode="numeric" min="0" max="59" value="${esc(j.m)}"><span class="u">хв</span></div></div>
+        <div><label class="lbl" for="jHv${i}">Перезапуск, хв</label><div class="unit"><input class="inp" id="jHv${i}" data-k="harvest" type="number" inputmode="numeric" min="0" value="${esc(j.harvest)}"><span class="u">хв</span></div></div>
+        <div><label class="lbl" for="jP${i}">Деталей за цикл</label><div class="unit"><input class="inp" id="jP${i}" data-k="parts" type="number" inputmode="numeric" min="1" value="${esc(j.parts)}"><span class="u">шт</span></div></div>
+      </div>
+    </li>`).join('');
+  return `<section class="editor" id="editor" aria-label="Редагування плану">
+    <div class="ed-head"><h2>Редагування плану</h2><p class="note">Цикли перерахуються. Зафіксовані збори залишаються як є.</p></div>
+    <div class="ed-base">
+      <div><label class="lbl" for="eShift">Графік зміни</label>
+        <select class="inp" id="eShift">${opt('day', 'Денна (08:00 – 20:00)')}${opt('night', 'Нічна (20:00 – 08:00)')}${opt('custom', 'Свій графік…')}</select></div>
+      <div class="row2" id="eCustom"${ed.shift === 'custom' ? '' : ' hidden'}>
+        <div><label class="lbl" for="eShiftStart">Початок зміни</label><input class="inp" id="eShiftStart" type="time" value="${esc(ed.shiftStart)}"></div>
+        <div><label class="lbl" for="eShiftEnd">Кінець зміни</label><input class="inp" id="eShiftEnd" type="time" value="${esc(ed.shiftEnd)}"></div>
+      </div>
+      <div class="row2">
+        <div><label class="lbl" for="eDate">Дата зміни</label><input class="inp" id="eDate" type="date" value="${esc(ed.date)}"></div>
+        <div><label class="lbl" for="eStart">Початок друку</label><input class="inp" id="eStart" type="time" value="${esc(ed.start)}"></div>
+      </div>
+    </div>
+    <ol class="jobs">${jobs}</ol>
+    <button type="button" class="ghost add" data-act="ed-add">+ Заміна фігурок з циклу…</button>
+    <p class="form-error" id="edErr" role="alert" hidden></p>
+    <div class="ed-actions">
+      <button type="button" class="primary tg-dup" data-act="ed-save">Зберегти зміни</button>
+      <button type="button" class="ghost" data-act="ed-cancel">Скасувати</button>
+    </div>
+  </section>`;
+}
+function readEditor() {
+  const ed = state.editing;
+  const root = el.result.querySelector('#editor');
+  if (!ed || !root) return ed;
+  const v = id => { const n = root.querySelector('#' + id); return n ? n.value : ''; };
+  ed.shift = v('eShift'); ed.shiftStart = v('eShiftStart'); ed.shiftEnd = v('eShiftEnd');
+  ed.date = v('eDate'); ed.start = v('eStart');
+  root.querySelectorAll('.job').forEach(li => {
+    const j = ed.jobs[Number(li.dataset.j)];
+    if (!j) return;
+    li.querySelectorAll('[data-k]').forEach(inp => { j[inp.dataset.k] = inp.value; });
+  });
+  return ed;
+}
+function suggestFrom() {
+  const sh = state.shown;
+  const st = sh && sh.st;
+  let n = 2;
+  if (st) n = st.phase === 'harvest' ? st.x.n + 1 : st.x.n;
+  else if (sh && sh.c.lastFix) n = sh.c.lastFix + 1;
+  const ed = state.editing;
+  const maxFrom = Math.max(...ed.jobs.map(j => int(j.from) || 1));
+  return Math.max(2, n, maxFrom + 1);
+}
+function editorToPlan(ed, base) {
+  const err = m => ({ error: m });
+  let shiftStart = null, shiftEnd = null;
+  if (ed.shift === 'custom') {
+    shiftStart = parseTime(ed.shiftStart); shiftEnd = parseTime(ed.shiftEnd);
+    if (shiftStart == null || shiftEnd == null) return err('Вкажіть початок і кінець своєї зміни.');
+  }
+  const start = parseTime(ed.start);
+  if (start == null) return err('Вкажіть час початку друку.');
+  if (!validIso(ed.date)) return err('Вкажіть дату зміни.');
+  const seen = new Set();
+  const jobs = [];
+  for (let i = 0; i < ed.jobs.length; i++) {
+    const j = ed.jobs[i];
+    const from = i === 0 ? 1 : int(j.from);
+    const label = i === 0 ? 'Перші фігурки' : `Заміна «${j.name || 'без назви'}»`;
+    if (i > 0 && from < 2) return err(`${label}: вкажіть номер циклу, з якого вона діє (від 2).`);
+    if (seen.has(from)) return err(`Дві заміни з одного циклу №${from}. Залиште одну.`);
+    seen.add(from);
+    const printMin = int(j.h) * 60 + int(j.m);
+    if (printMin < 1) return err(`${label}: вкажіть час друку.`);
+    const hv = Math.min(int(j.harvest), 1440);
+    jobs.push({ from, name: String(j.name || '').trim().slice(0, 60), printMin, harvestOn: hv > 0, harvestMin: hv, parts: Math.max(1, int(j.parts) || 1) });
+  }
+  jobs.sort((a, b) => a.from - b.from);
+  const j0 = jobs[0];
+  return { plan: Object.assign({}, base, {
+    shift: ed.shift, shiftStart, shiftEnd, date: ed.date, start, jobs,
+    name: j0.name, printMin: j0.printMin, harvestOn: j0.harvestOn, harvestMin: j0.harvestMin, parts: j0.parts,
+    updatedAt: Date.now(), v: 2
+  }) };
+}
+
+/* ================= harvest fixation ================= */
+async function recordFix(n, doneMin) {
+  const plan = state.current;
+  if (!plan) return;
+  const fixes = (Array.isArray(plan.fixes) ? plan.fixes : []).filter(f => f.n !== n && f.n < n);
+  fixes.push({ n, done: Math.round(doneMin) });
+  const upd = Object.assign({}, plan, { fixes, updatedAt: Date.now() });
+  const c2 = compute(upd);
+  const x = c2.cycles[n - 1];
+  state.current = upd;
+  state.fixManual = false;
+  render();
+  const ok = await savePlan(upd);
+  if (ok && x) {
+    haptic('note', 'success');
+    const nx = c2.cycles[n];
+    toast(`Перезапуск після №${n}: ${x.pause} хв (норма ${x.preset}).${nx ? ` Цикли перераховано від ${hhmm(nx.start)}.` : ''}`);
+  }
+}
+async function undoFix() {
+  const plan = state.current;
+  if (!plan || !Array.isArray(plan.fixes) || !plan.fixes.length) return;
+  const maxN = Math.max(...plan.fixes.map(f => f.n));
+  const upd = Object.assign({}, plan, { fixes: plan.fixes.filter(f => f.n !== maxN), updatedAt: Date.now() });
+  state.current = upd;
+  render();
+  if (await savePlan(upd)) toast(`Фіксацію після №${maxN} скасовано`);
+}
+function nearestOffset(timeMin, ref) {
+  let best = timeMin, bd = Infinity;
+  for (let k = -1; k <= 3; k++) { const v = timeMin + 1440 * k; const d = Math.abs(v - ref); if (d < bd) { bd = d; best = v; } }
+  return best;
+}
+
+/* ================= sound ================= */
+let soundOn = false, actx = null;
+function beep(times) {
+  if (!actx) return;
+  try {
+    let t = actx.currentTime + 0.02;
+    for (let i = 0; i < times; i++) {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      o.connect(g).connect(actx.destination);
+      o.start(t); o.stop(t + 0.4);
+      t += 0.5;
+    }
+  } catch {}
+}
+
+/* ================= exports ================= */
+function planText(p, c) {
+  const N = c.inShift.length, multi = c.jobs.length > 1;
+  const L = [`3D План · ${p.name || c.jobs[0].name || 'Без назви'}`, `${c.sh.label} ${hhmm(c.s)}–${hhmm(c.e)} · ${fmtDate(p.date)}`];
+  if (!multi) { const j = c.jobs[0]; L.push(`Друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${j.parts > 1 ? ` · ${j.parts} шт/цикл` : ''}`); }
+  L.push('');
+  for (const x of c.cycles) {
+    if (multi && x.n === x.job.from) {
+      const j = x.job;
+      L.push(`${x.ji ? '— Заміна' : '— Фігурки'}${j.name ? ': ' + j.name : ''} (з №${x.n}, друк ${dur(j.printMin)}, збір ${j.harvestOn ? j.harvestMin : 0} хв)`);
+    }
+    const pz = x.kind === 'actual' ? `пауза/збір ${x.pause} хв ✓ факт` : x.pause ? `пауза/збір ${x.pause} хв` : '';
+    L.push(`Цикл №${x.n}: ${hhmm(x.start)} → ${hhmm(x.end)}${pz ? ' · ' + pz : ''}${x.next ? '  (наст. зміна)' : ''}`);
+  }
+  L.push('');
+  L.push(`У зміні: ${N} ${cyclesWord(N)}${c.anyParts ? `, ${c.parts} шт` : ''}${c.last ? `, останній до ${hhmm(c.last.end)}, запас ${dur(c.slack)}` : ''}`);
+  return L.join('\n');
+}
+function fileBase(p, c) {
+  const n = (p.name || c.jobs[0].name || 'plan').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'plan';
+  return `3D-plan_${n}_${p.date}`;
+}
+function icsText(p, c) {
+  const enc = new TextEncoder();
+  const fold = line => {
+    if (enc.encode(line).length <= 75) return line;
+    let out = '', cur = '', bytes = 0;
+    for (const ch of line) {
+      const b = enc.encode(ch).length;
+      if (bytes + b > (out ? 74 : 75)) { out += (out ? '\r\n ' : '') + cur; cur = ''; bytes = 0; }
+      cur += ch; bytes += b;
+    }
+    return out + (out ? '\r\n ' : '') + cur;
+  };
+  const icsEsc = s => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  const f = ms => { const d = new Date(ms); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`; };
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const uid = p.id || 'draft' + Date.now().toString(36);
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//3D Plan//UK', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+  for (const x of c.cycles) {
+    const nm = x.job.name || p.name || 'Без назви';
+    L.push('BEGIN:VEVENT', `UID:${uid}-${x.n}@3d-plan`, `DTSTAMP:${stamp}`,
+      `DTSTART:${f(at(p.date, x.start))}`, `DTEND:${f(at(p.date, x.end))}`,
+      `SUMMARY:${icsEsc(`Друк №${x.n} · ${nm}${x.next ? ' (наст. зміна)' : ''}`)}`,
+      `DESCRIPTION:${icsEsc(x.pause ? `Після завершення: збір ${x.pause} хв` : 'Кінець циклу друку')}`,
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(`Цикл №${x.n} завершено`)}`, 'TRIGGER;RELATED=END:PT0M', 'END:VALARM',
+      'END:VEVENT');
+  }
+  L.push('END:VCALENDAR');
+  return L.map(fold).join('\r\n') + '\r\n';
+}
+async function planPNG(p, c) {
+  try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch {}
+  const UI = 'Manrope, "Segoe UI", Roboto, system-ui, sans-serif';
+  const NUM = '"JetBrains Mono", Consolas, ui-monospace, monospace';
+  const multi = c.jobs.length > 1;
+  const items = [];
+  c.cycles.forEach(x => { if (multi && x.n === x.job.from) items.push({ job: x.job, ji: x.ji, n: x.n }); items.push({ x }); });
+  const W = 1080, PX = 64, ROW = 96, GAP = 12, JROW = 58, HEAD = 300, FOOT = 190;
+  const H = HEAD + items.reduce((a, it) => a + (it.x ? ROW + GAP : JROW), 0) + FOOT;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  const rr = (x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+  const fit = (t, max) => { if (g.measureText(t).width <= max) return t; while (t.length > 1 && g.measureText(t + '…').width > max) t = t.slice(0, -1); return t + '…'; };
+  g.fillStyle = '#0d0f15'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#b69cff'; g.font = `800 26px ${UI}`; g.fillText('3D ПЛАН ДРУКУ', PX, 84);
+  g.fillStyle = '#eceef5'; g.font = `800 56px ${UI}`; g.fillText(fit(p.name || c.jobs[0].name || 'Без назви', W - 2 * PX), PX, 156);
+  g.fillStyle = '#8a90a6'; g.font = `600 28px ${UI}`;
+  g.fillText(fit(`${c.sh.label} ${hhmm(c.s)}–${hhmm(c.e)} · ${fmtDate(p.date)}`, W - 2 * PX), PX, 206);
+  const j0 = c.jobs[0];
+  g.fillText(fit(multi ? `${c.jobs.length} види фігурок` : `Друк ${dur(j0.printMin)} · збір ${j0.harvestOn ? j0.harvestMin : 0} хв${j0.parts > 1 ? ` · ${j0.parts} шт/цикл` : ''}`, W - 2 * PX), PX, 250);
+  let y = HEAD;
+  for (const it of items) {
+    if (!it.x) {
+      g.fillStyle = jobColor(it.ji); rr(PX, y + 18, 16, 16, 4); g.fill();
+      g.fillStyle = '#eceef5'; g.font = `800 26px ${UI}`;
+      g.fillText(fit(`${it.ji ? 'Заміна' : 'Фігурки'}${it.job.name ? ': ' + it.job.name : ''} · з №${it.n} · друк ${dur(it.job.printMin)}`, W - 2 * PX - 30), PX + 30, y + 35);
+      y += JROW; continue;
+    }
+    const x = it.x;
+    rr(PX, y, W - 2 * PX, ROW, 18);
+    g.fillStyle = x.next ? '#0f2624' : '#161922'; g.fill();
+    g.lineWidth = 2; g.strokeStyle = x.next ? '#1fc7a8' : '#2a2f40'; g.stroke();
+    rr(PX + 20, y + 22, 52, 52, 12);
+    g.fillStyle = x.next ? 'rgba(31,199,168,.18)' : 'rgba(139,92,246,.2)'; g.fill();
+    g.textAlign = 'center'; g.fillStyle = x.next ? '#1fc7a8' : '#b69cff'; g.font = `700 26px ${NUM}`;
+    g.fillText(String(x.n), PX + 46, y + 57);
+    g.textAlign = 'left'; g.font = `700 38px ${NUM}`;
+    const t1 = hhmm(x.start), w1 = g.measureText(t1).width;
+    g.fillStyle = '#eceef5'; g.fillText(t1, PX + 96, y + 61);
+    g.fillStyle = '#5b6178'; g.fillText('→', PX + 96 + w1 + 14, y + 61);
+    const wa = g.measureText('→').width;
+    g.fillStyle = x.next ? '#1fc7a8' : '#b69cff'; g.fillText(hhmm(x.end), PX + 96 + w1 + 14 + wa + 14, y + 61);
+    g.textAlign = 'right';
+    if (x.next) { g.fillStyle = '#1fc7a8'; g.font = `800 22px ${UI}`; g.fillText('НАСТ. ЗМІНА', W - PX - 24, y + 57); }
+    else {
+      g.font = `600 24px ${UI}`;
+      g.fillStyle = x.kind === 'actual' ? '#1fc7a8' : '#8a90a6';
+      const lbl = x.kind === 'actual' ? `збір ${x.pause} хв · факт` : x.pause ? `збір ${x.pause} хв` : dur(x.P);
+      g.fillText(lbl, W - PX - 24, y + 57);
+    }
+    g.textAlign = 'left';
+    y += ROW + GAP;
+  }
+  const N = c.inShift.length;
+  y += 40;
+  g.fillStyle = '#eceef5'; g.font = `800 34px ${UI}`;
+  g.fillText(fit(`У зміні: ${N} ${cyclesWord(N)}${c.anyParts ? ` · ${c.parts} шт` : ''}`, W - 2 * PX), PX, y);
+  g.fillStyle = '#8a90a6'; g.font = `600 26px ${UI}`;
+  g.fillText(fit(c.last ? `Останній цикл зміни до ${hhmm(c.last.end)} · запас ${dur(c.slack)}` : 'Жоден цикл не вкладається у зміну', W - 2 * PX), PX, y + 46);
+  return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = t; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy'); ta.remove(); return ok;
+  } catch { return false; }
+}
+async function saveFile(filename, data, mime) {
+  try {
+    const blob = data instanceof Blob ? data : new Blob([data], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast('Файл збережено');
+  } catch { toast('Не вдалося зберегти файл'); }
+}
+function applyCaps() {
+  const avail = { dl: !inTG, ics: !inTG, share: caps.share, tg: inTG };
+  el.result.querySelectorAll('[data-needs]').forEach(b => { b.hidden = !avail[b.dataset.needs]; });
+}
+
+/* ================= actions ================= */
+async function doAction(act, btn) {
+  if (act === 'back') { state.view = state.openedFrom === 'history' && state.current ? 'history' : 'form'; state.editing = null; render(); window.scrollTo(0, 0); return; }
+  if (act === 'sound') {
+    soundOn = !soundOn;
+    if (soundOn) {
+      try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); await actx.resume(); beep(1); }
+      catch { soundOn = false; toast('Звук недоступний у цьому браузері'); }
+    }
+    rerender(); return;
+  }
+  if (act === 'edit') {
+    state.editing = edFromPlan(state.current); rerender();
+    const ed = el.result.querySelector('#editor'); if (ed) ed.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    return;
+  }
+  if (act === 'ed-cancel') { state.editing = null; rerender(); return; }
+  if (act === 'ed-add') {
+    const ed = readEditor(); const prev = ed.jobs[ed.jobs.length - 1];
+    ed.jobs.push({ from: String(suggestFrom()), name: '', h: prev.h, m: prev.m, harvest: prev.harvest, parts: prev.parts });
+    rerender();
+    const i = ed.jobs.length - 1; const n = el.result.querySelector('#jName' + i); if (n) { n.scrollIntoView({ block: 'center' }); n.focus(); }
+    return;
+  }
+  if (act === 'ed-del') { const ed = readEditor(); ed.jobs.splice(Number(btn.dataset.j), 1); rerender(); return; }
+  if (act === 'ed-save') {
+    const ed = readEditor();
+    const r = editorToPlan(ed, state.current);
+    if (r.error) { const e = el.result.querySelector('#edErr'); e.textContent = r.error; e.hidden = false; return; }
+    state.editing = null; state.current = r.plan; rerender(); window.scrollTo(0, 0);
+    if (await savePlan(r.plan)) { haptic('note', 'success'); toast('Зміни збережено'); }
+    return;
+  }
+  if (act === 'fix') { const st = state.shown && state.shown.st; if (st) recordFix(Number(btn.dataset.n), Math.round(nowMinFor(state.current))); return; }
+  if (act === 'fix-manual') { state.fixManual = !state.fixManual; rerender(); if (state.fixManual) { const t = el.result.querySelector('#fixTime'); if (t) t.focus(); } return; }
+  if (act === 'fix-save') {
+    const n = Number(btn.dataset.n), v = parseTime(el.result.querySelector('#fixTime').value);
+    const x = state.shown && state.shown.c.cycles[n - 1];
+    if (v == null || !x) { toast('Вкажіть час'); return; }
+    const done = nearestOffset(v, x.end + x.planned);
+    if (done < x.start) { toast('Цей час раніше за старт циклу. Перевірте його.'); return; }
+    recordFix(n, done); return;
+  }
+  if (act === 'undo') { undoFix(); return; }
+  const sh = state.shown; if (!sh) return;
+  const { p, c } = sh;
+  if (act === 'copy') { toast(await copyText(planText(p, c)) ? 'Текст скопійовано' : 'Не вдалося скопіювати'); return; }
+  if (act === 'txt') { await saveFile(fileBase(p, c) + '.txt', planText(p, c), 'text/plain;charset=utf-8'); return; }
+  if (act === 'ics') { await saveFile(fileBase(p, c) + '.ics', icsText(p, c), 'text/calendar;charset=utf-8'); return; }
+  if (act === 'png') { const b = await planPNG(p, c); if (b) await saveFile(fileBase(p, c) + '.png', b, 'image/png'); return; }
+  if (act === 'tgshare') {
+    try { tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(planText(p, c))); }
+    catch { toast('Не вдалося відкрити вибір чату'); }
+    return;
+  }
+  if (act === 'share') {
+    try {
+      const b = await planPNG(p, c);
+      await navigator.share({ files: [new File([b], fileBase(p, c) + '.png', { type: 'image/png' })], text: planText(p, c) });
+    } catch (e) { if (!e || e.name !== 'AbortError') toast('Не вдалося поділитися'); }
+  }
+}
+function rerender() { if (state.view === 'result' && state.current) renderResult(state.current, true); else render(); }
+
+/* ================= history / storage ================= */
+function renderHistory() {
+  const list = store.plans.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  el.histCount.hidden = !list.length;
+  el.histCount.textContent = list.length;
+  if (el.history.hidden) return;
+  const note = `<span class="store-note">${store.mode === 'tg' ? IC.cloud : IC.device}${esc(store.note)}</span>`;
+  if (!list.length) {
+    el.history.innerHTML = `<div class="hist"><div class="hist-head"><h2>Збережені плани</h2>${note}</div>
+      <div class="soft">${store.loading ? 'Завантажую історію з Telegram…' : "Тут з'являться плани після натискання «Розрахувати»."}</div></div>`;
+    return;
+  }
+  el.history.innerHTML = `<div class="hist">
+    <div class="hist-head"><h2>Збережені плани</h2>${note}</div>
+    <ul class="hist-list">${list.map(pl => {
+      let c;
+      try { c = compute(pl, null); } catch { return ''; }
+      const key = c.sh.key;
+      const shLabel = key === 'custom' ? `${hhmm(c.s)}–${hhmm(c.e)}` : key === 'night' ? 'Нічна' : 'Денна';
+      const n = c.inShift.length, j0 = c.jobs[0];
+      const extra = [];
+      if (c.jobs.length > 1) extra.push(`${c.jobs.length} ${plural(c.jobs.length, 'вид', 'види', 'видів')} фігурок`);
+      else extra.push(`старт ${hhmm(pl.start)}, цикл ${dur(j0.printMin)}`);
+      if (c.fixCount) extra.push(`${c.fixCount} ${fixWord(c.fixCount)}`);
+      return `<li class="hi">
+        <button type="button" class="hi-open" data-open="${esc(pl.id)}">
+          <span class="hi-name">${esc(pl.name || j0.name || 'Без назви')}</span>
+          <span class="hi-meta"><span class="pill">${shiftIcon(key)}${esc(shLabel)}</span><span>${n} ${cyclesWord(n)}${c.nextCycle ? ' <span class="plus">+1</span>' : ''}</span>${extra.map(t => `<span>${esc(t)}</span>`).join('')}</span>
+          <span class="hi-time">${esc(fmtStamp(pl.createdAt))}${pl.updatedAt && pl.updatedAt - pl.createdAt > 60000 ? ' · змінено ' + esc(fmtStamp(pl.updatedAt)) : ''}</span>
+        </button>
+        <button type="button" class="iconbtn" data-edit="${esc(pl.id)}" aria-label="Редагувати план">${IC.edit}</button>
+        <button type="button" class="iconbtn del" data-del="${esc(pl.id)}" aria-label="Видалити план">${IC.trash}</button>
+      </li>`;
+    }).join('')}</ul></div>`;
+}
+
+async function savePlan(plan) {
+  if (store.mode === 'tg') {
+    const json = JSON.stringify(plan);
+    if (json.length > 4096) { toast('План завеликий для збереження в Telegram'); return false; }
+    try { await csCall('setItem', 'p_' + plan.id, json); }
+    catch { toast('Не вдалося зберегти в Telegram. Перевірте зʼєднання.'); return false; }
+  }
+  const i = store.plans.findIndex(x => x.id === plan.id);
+  if (i >= 0) store.plans[i] = plan; else store.plans.unshift(plan);
+  if (store.mode === 'tg') {
+    const extra = store.plans.slice().sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0)).slice(300);
+    for (const pl of extra) { try { await csCall('removeItem', 'p_' + pl.id); } catch {} }
+    if (extra.length) store.plans = store.plans.filter(x => !extra.includes(x));
+  } else {
+    store.plans = store.plans.slice(0, 300);
+    lsSet(LS_PLANS, store.plans);
+  }
+  renderHistory();
+  return true;
+}
+async function deletePlan(id) {
+  if (store.mode === 'tg') {
+    try { await csCall('removeItem', 'p_' + id); } catch { toast('Не вдалося видалити'); return; }
+  }
+  store.plans = store.plans.filter(x => x.id !== id);
+  if (store.mode !== 'tg') lsSet(LS_PLANS, store.plans);
+  if (state.current && state.current.id === id) state.current = null;
+  renderHistory();
+  haptic('note', 'success');
+  toast('План видалено');
+}
+function openPlan(id, edit) {
+  const pl = store.plans.find(x => x.id === id);
+  if (!pl) return;
+  state.current = pl;
+  state.openedFrom = 'history';
+  state.view = 'result';
+  state.fixManual = false;
+  state.editing = edit ? edFromPlan(pl) : null;
+  render();
+  window.scrollTo(0, 0);
+}
+
+async function initStorage() {
+  try { caps.share = !!navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.png', { type: 'image/png' })] }); } catch { caps.share = false; }
+  applyCaps();
+  if (store.mode === 'tg') await refreshCloud();
+}
+let refreshing = false;
+async function refreshCloud() {
+  if (store.mode !== 'tg' || refreshing) return;
+  refreshing = true;
+  try {
+    const keys = ((await csCall('getKeys')) || []).filter(k => /^p_/.test(k));
+    const plans = [];
+    for (let i = 0; i < keys.length; i += 50) {
+      const chunk = keys.slice(i, i + 50);
+      const vals = (await csCall('getItems', chunk)) || {};
+      chunk.forEach((k, j) => {
+        const raw = Array.isArray(vals) ? vals[j] : vals[k];
+        try { const pl = raw ? JSON.parse(raw) : null; if (pl && pl.id) plans.push(pl); } catch {}
+      });
+    }
+    store.plans = plans;
+    store.note = 'Зберігається в Telegram, однаково на всіх ваших пристроях';
+    if (state.current) {
+      const upd = plans.find(x => x.id === state.current.id);
+      if (upd && (upd.updatedAt || 0) > (state.current.updatedAt || 0)) {
+        state.current = upd;
+        if (state.view === 'result' && !state.editing && !state.fixManual) renderResult(upd, true);
+      }
+    }
+  } catch {
+    store.note = 'Не вдалося завантажити історію з Telegram. Відкрийте застосунок ще раз.';
+  }
+  store.loading = false;
+  refreshing = false;
+  renderHistory();
+}
+
+/* ================= live tick ================= */
+function tick() {
+  const sh = state.shown;
+  if (!sh || el.result.hidden || state.editing || state.fixManual) return;
+  const a = document.activeElement;
+  if (a && el.result.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
+  const nowMin = nowMinFor(sh.p);
+  let st = phaseAt(sh.c, nowMin, sh.saved);
+  if (st && st.phase === 'wait' && st.left > 720) st = null;
+  const key = phaseKeyOf(st);
+  const sig = `${key}|${Math.floor(nowMin)}`;
+  if (state.phaseKey !== key && st && st.phase === 'harvest') haptic('note', 'warning');
+  if (soundOn && state.phaseKey !== key && st) {
+    if (st.phase === 'harvest' && st.over > 0) beep(1);
+    else if (st.phase === 'harvest') beep(3);
+  }
+  if (sig !== state.sig) rerender();
+}
+
+/* ================= toast ================= */
+let toastT = 0;
+function toast(msg) {
+  el.toast.textContent = msg;
+  el.toast.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.toast.classList.remove('show'), 3200);
+}
+
+/* ================= events ================= */
+function formChanged(e) {
+  if (e && e.target === el.date) state.dateTouched = true;
+  if (e && e.target === el.shift && !state.dateTouched) el.date.value = defaultDate();
+  syncFormBits(); saveDraft();
+  el.err.hidden = true;
+  state.view = 'form'; state.openedFrom = 'new'; state.editing = null;
+  render();
+}
+el.form.addEventListener('input', formChanged);
+el.form.addEventListener('change', e => { if (e.target === el.shift || e.target === el.harvestOn) formChanged(e); });
+el.now.addEventListener('click', () => {
+  const d = new Date();
+  el.start.value = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  if (!state.dateTouched) el.date.value = defaultDate();
+  formChanged();
+});
+/* No form submission: the published page runs in a sandboxed frame that blocks it. The button and Enter call calculate() directly. */
+el.form.addEventListener('submit', e => { e.preventDefault(); calculate(); });
+el.form.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); calculate(); }
+});
+$('#btnCalc').addEventListener('click', calculate);
+async function calculate() {
+  const { p, error } = readForm();
+  if (error) { el.err.textContent = error; el.err.hidden = false; return; }
+  el.err.hidden = true;
+  const now = Date.now();
+  const plan = Object.assign({}, p, {
+    id: newId(), createdAt: now, updatedAt: now, v: 2, fixes: [],
+    jobs: [{ from: 1, name: p.name, printMin: p.printMin, harvestOn: p.harvestOn, harvestMin: p.harvestMin, parts: p.parts }]
+  });
+  state.current = plan; state.openedFrom = 'new'; state.view = 'result'; state.editing = null; state.fixManual = false;
+  render();
+  window.scrollTo(0, 0);
+  if (await savePlan(plan)) { haptic('note', 'success'); toast('План збережено в історії'); }
+}
+el.tabNew.addEventListener('click', () => { state.view = 'form'; state.openedFrom = 'new'; state.editing = null; render(); window.scrollTo(0, 0); });
+el.tabHist.addEventListener('click', () => { state.view = 'history'; state.editing = null; render(); window.scrollTo(0, 0); });
+el.result.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]');
+  if (b) doAction(b.dataset.act, b);
+});
+el.result.addEventListener('change', e => {
+  if (e.target.id === 'eShift') {
+    readEditor();
+    const cu = el.result.querySelector('#eCustom');
+    if (cu) cu.hidden = e.target.value !== 'custom';
+  }
+});
+el.result.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'fixTime') { e.preventDefault(); const b = el.result.querySelector('[data-act="fix-save"]'); if (b) doAction('fix-save', b); }
+});
+el.history.addEventListener('click', e => {
+  const del = e.target.closest('[data-del]');
+  if (del) {
+    if (inTG && tgAt('6.2')) {
+      const pl = store.plans.find(x => x.id === del.dataset.del);
+      tg.showConfirm(`Видалити план «${(pl && (pl.name || (pl.jobs && pl.jobs[0] && pl.jobs[0].name))) || 'Без назви'}»?`, ok => { if (ok) deletePlan(del.dataset.del); });
+      return;
+    }
+    if (del.classList.contains('armed')) { deletePlan(del.dataset.del); return; }
+    del.classList.add('armed'); del.textContent = 'Видалити?';
+    setTimeout(() => { if (del.isConnected) { del.classList.remove('armed'); del.innerHTML = IC.trash; } }, 3000);
+    return;
+  }
+  const ed = e.target.closest('[data-edit]');
+  if (ed) { openPlan(ed.dataset.edit, true); return; }
+  const op = e.target.closest('[data-open]');
+  if (op) openPlan(op.dataset.open, false);
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); refreshCloud(); } });
+setInterval(tick, 15000);
+
+/* ================= start ================= */
+initTg();
+loadDraft();
+el.date.value = defaultDate();
+syncFormBits();
+render();
+renderHistory();
+initStorage();
+})();
+</script>
+</body>
+</html>
