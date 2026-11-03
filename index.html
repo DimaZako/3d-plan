@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="3D План">
-<meta name="description" content="Telegram Mini App: планувальник циклів 3D-друку в межах робочої зміни: старт, кінець, збір, фіксація фактичного часу, заміна фігурок.">
+<meta name="description" content="Telegram Mini App: планувальник циклів 3D-друку в межах робочої зміни: старт, кінець, збір, фіксація фактичного часу, заміна деталей.">
 <title>3D План</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -255,6 +255,16 @@ details.more .parts-box .row2{margin-top:0}
 .hist{display:grid;gap:14px}
 .hist-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
 .hist-head h2{margin:0;font-size:24px;font-weight:800}
+.hist-head .hh{display:grid;gap:6px;min-width:0}
+.clear-btn{appearance:none;display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;border-radius:12px;border:1px solid rgba(239,91,91,.45);background:transparent;color:#ff9a9a;font-weight:700;font-size:14px;cursor:pointer}
+.clear-btn:hover{background:rgba(239,91,91,.1)}
+.modal{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:rgba(5,6,10,.7)}
+.modal-card{width:min(360px,100%);background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:20px;display:grid;gap:18px;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+.modal-card p{margin:0;font-size:17px;font-weight:700;line-height:1.4}
+.modal-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.modal-btns button{min-height:48px;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer}
+.btn-no{appearance:none;background:var(--surface-2);border:1px solid var(--line);color:var(--text)}
+.btn-yes{appearance:none;background:var(--danger);border:1px solid var(--danger);color:#fff}
 .store-note{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted)}
 .hist-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .hi{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:6px 8px 6px 4px}
@@ -372,6 +382,12 @@ details.more .parts-box .row2{margin-top:0}
   </section>
 </main>
 
+<div class="modal" id="modal" hidden>
+  <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="modalText">
+    <p id="modalText"></p>
+    <div class="modal-btns"><button type="button" class="btn-no" data-answer="no">Ні</button><button type="button" class="btn-yes" data-answer="yes">Так</button></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -782,7 +798,7 @@ function renderResult(p, saved) {
 
   const j0 = c.jobs[0];
   const metaTail = multi
-    ? `${c.jobs.length} ${plural(c.jobs.length, 'вид', 'види', 'видів')} фігурок`
+    ? `${c.jobs.length} ${plural(c.jobs.length, 'вид', 'види', 'видів')} деталей`
     : `цикл ${dur(j0.printMin)}${j0.harvestOn && j0.harvestMin ? `, збір ${j0.harvestMin} хв` : ', без збору'}`;
 
   const sameParts = c.jobs.every(j => j.parts === j0.parts);
@@ -861,7 +877,7 @@ function rowsHTML(c, st, onlyN) {
     if (onlyN && x.n !== onlyN) continue;
     if (multi && !onlyN && x.n === x.job.from) {
       const j = x.job;
-      out.push(`<li class="job-div" style="--jc:${jobColor(x.ji)}"><span class="jd-dot"></span><span><b>${x.ji === 0 ? 'Фігурки' : 'Заміна фігурок'}${j.name ? ': ' + esc(j.name) : ''}</b> · з циклу №${x.n} · друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${c.countParts ? ` · ${j.parts} шт на столі` : ''}</span></li>`);
+      out.push(`<li class="job-div" style="--jc:${jobColor(x.ji)}"><span class="jd-dot"></span><span><b>${x.ji === 0 ? 'Деталі' : 'Заміна деталей'}${j.name ? ': ' + esc(j.name) : ''}</b> · з циклу №${x.n} · друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${c.countParts ? ` · ${j.parts} шт на столі` : ''}</span></li>`);
     }
     let cls = '', chip = '';
     if (st) {
@@ -904,7 +920,7 @@ function timelineHTML(c, nowMin) {
   const labels = ticks.map(t => `<span class="${t.cls}" style="left:${pct(t.m).toFixed(3)}%">${tickLabel(t.m)}</span>`).join('');
   const nowIn = nowMin >= c.s && nowMin <= c.e;
   const jobsLegend = c.jobs.length > 1
-    ? c.jobs.map((j, i) => `<span><i style="background:${jobColor(i)}"></i>${esc(j.name || (i ? 'заміна ' + i : 'фігурки'))}</span>`).join('')
+    ? c.jobs.map((j, i) => `<span><i style="background:${jobColor(i)}"></i>${esc(j.name || (i ? 'заміна ' + i : 'деталі'))}</span>`).join('')
     : '<span><i style="background:var(--accent)"></i>друк</span>';
   return `
     <div class="tl">
@@ -984,12 +1000,12 @@ function editorHTML(ed) {
   const jobs = ed.jobs.map((j, i) => `
     <li class="job" data-j="${i}" style="--jc:${jobColor(i)}">
       <div class="job-head">
-        <span class="job-tag">${i === 0 ? 'Фігурки з циклу №1' : 'Заміна фігурок'}</span>
+        <span class="job-tag">${i === 0 ? 'Деталі з циклу №1' : 'Заміна деталей'}</span>
         ${i > 0 ? `<button type="button" class="iconbtn del" data-act="ed-del" data-j="${i}" aria-label="Прибрати цю заміну">${IC.trash}</button>` : ''}
       </div>
       <div class="job-grid">
         ${i > 0 ? `<div><label class="lbl" for="jFrom${i}">З циклу №</label><input class="inp" id="jFrom${i}" data-k="from" type="number" inputmode="numeric" min="2" value="${esc(j.from)}" style="font-family:var(--font-num);font-weight:700"></div>` : ''}
-        <div class="${i > 0 ? '' : 'wide'} half"><label class="lbl" for="jName${i}">Назва</label><input class="inp" id="jName${i}" data-k="name" type="text" maxlength="60" value="${esc(j.name)}" placeholder="${i ? 'Наприклад, Фігурка B' : 'Наприклад, Корпус'}"></div>
+        <div class="${i > 0 ? '' : 'wide'} half"><label class="lbl" for="jName${i}">Назва</label><input class="inp" id="jName${i}" data-k="name" type="text" maxlength="60" value="${esc(j.name)}" placeholder="${i ? 'Наприклад, Деталь B' : 'Наприклад, Корпус'}"></div>
         <div><label class="lbl" for="jH${i}">Друк, год</label><div class="unit"><input class="inp" id="jH${i}" data-k="h" type="number" inputmode="numeric" min="0" max="24" data-max="24" data-role="h" value="${esc(j.h)}"><span class="u">год</span></div></div>
         <div><label class="lbl" for="jM${i}">Друк, хв</label><div class="unit"><input class="inp" id="jM${i}" data-k="m" type="number" inputmode="numeric" min="0" max="59" data-max="59" data-role="m" value="${esc(j.m)}"><span class="u">хв</span></div></div>
         <div><label class="lbl" for="jHv${i}">Перезапуск, хв</label><div class="unit"><input class="inp" id="jHv${i}" data-k="harvest" type="number" inputmode="numeric" min="0" max="600" data-max="600" value="${esc(j.harvest)}"><span class="u">хв</span></div></div>
@@ -1017,7 +1033,7 @@ function editorHTML(ed) {
       </div>
     </div>
     <ol class="jobs">${jobs}</ol>
-    <button type="button" class="ghost add" data-act="ed-add">+ Заміна фігурок з циклу…</button>
+    <button type="button" class="ghost add" data-act="ed-add">+ Заміна деталей з циклу…</button>
     <p class="form-error" id="edErr" role="alert" hidden></p>
     <div class="ed-actions">
       <button type="button" class="primary tg-dup" data-act="ed-save">Зберегти зміни</button>
@@ -1066,7 +1082,7 @@ function editorToPlan(ed, base) {
   for (let i = 0; i < ed.jobs.length; i++) {
     const j = ed.jobs[i];
     const from = i === 0 ? 1 : int(j.from);
-    const label = i === 0 ? 'Перші фігурки' : `Заміна «${j.name || 'без назви'}»`;
+    const label = i === 0 ? 'Перші деталі' : `Заміна «${j.name || 'без назви'}»`;
     if (i > 0 && from < 2) return err(`${label}: вкажіть номер циклу, з якого вона діє (від 2).`);
     if (seen.has(from)) return err(`Дві заміни з одного циклу №${from}. Залиште одну.`);
     seen.add(from);
@@ -1217,7 +1233,7 @@ function planText(p, c) {
   for (const x of c.cycles) {
     if (multi && x.n === x.job.from) {
       const j = x.job;
-      L.push(`${x.ji ? '— Заміна' : '— Фігурки'}${j.name ? ': ' + j.name : ''} (з №${x.n}, друк ${dur(j.printMin)}, збір ${j.harvestOn ? j.harvestMin : 0} хв${c.countParts ? `, на столі ${j.parts} шт` : ''})`);
+      L.push(`${x.ji ? '— Заміна' : '— Деталі'}${j.name ? ': ' + j.name : ''} (з №${x.n}, друк ${dur(j.printMin)}, збір ${j.harvestOn ? j.harvestMin : 0} хв${c.countParts ? `, на столі ${j.parts} шт` : ''})`);
     }
     const pz = x.kind === 'actual' ? `пауза/збір ${x.pause} хв ✓ факт` : x.pause ? `пауза/збір ${x.pause} хв` : '';
     L.push(`Цикл №${x.n}: ${hhmm(x.start)} → ${hhmm(x.end)}${pz ? ' · ' + pz : ''}${x.next ? '  (наст. зміна)' : ''}`);
@@ -1279,13 +1295,13 @@ async function planPNG(p, c) {
   g.fillStyle = '#8a90a6'; g.font = `600 28px ${UI}`;
   g.fillText(fit(`${c.sh.label} ${hhmm(c.s)}–${hhmm(c.e)} · ${shiftDates(p, c)}`, W - 2 * PX), PX, 206);
   const j0 = c.jobs[0];
-  g.fillText(fit(multi ? `${c.jobs.length} види фігурок` : `Друк ${dur(j0.printMin)} · збір ${j0.harvestOn ? j0.harvestMin : 0} хв${c.countParts ? ` · ${j0.parts} шт × ${c.machines} од.` : ''}`, W - 2 * PX), PX, 250);
+  g.fillText(fit(multi ? `${c.jobs.length} види деталей` : `Друк ${dur(j0.printMin)} · збір ${j0.harvestOn ? j0.harvestMin : 0} хв${c.countParts ? ` · ${j0.parts} шт × ${c.machines} од.` : ''}`, W - 2 * PX), PX, 250);
   let y = HEAD;
   for (const it of items) {
     if (!it.x) {
       g.fillStyle = jobColor(it.ji); rr(PX, y + 18, 16, 16, 4); g.fill();
       g.fillStyle = '#eceef5'; g.font = `800 26px ${UI}`;
-      g.fillText(fit(`${it.ji ? 'Заміна' : 'Фігурки'}${it.job.name ? ': ' + it.job.name : ''} · з №${it.n} · друк ${dur(it.job.printMin)}`, W - 2 * PX - 30), PX + 30, y + 35);
+      g.fillText(fit(`${it.ji ? 'Заміна' : 'Деталі'}${it.job.name ? ': ' + it.job.name : ''} · з №${it.n} · друк ${dur(it.job.printMin)}`, W - 2 * PX - 30), PX + 30, y + 35);
       y += JROW; continue;
     }
     const x = it.x;
@@ -1448,7 +1464,7 @@ function renderHistory() {
     return;
   }
   el.history.innerHTML = `<div class="hist">
-    <div class="hist-head"><h2>Збережені плани</h2>${note}</div>
+    <div class="hist-head"><div class="hh"><h2>Збережені плани</h2>${note}</div><button type="button" class="clear-btn" data-clear>${IC.trash}Очистити історію</button></div>
     <ul class="hist-list">${list.map(pl => {
       let c;
       try { c = compute(pl, null); } catch { return ''; }
@@ -1465,6 +1481,64 @@ function renderHistory() {
         <button type="button" class="iconbtn del" data-del="${esc(pl.id)}" aria-label="Видалити план">${IC.trash}</button>
       </li>`;
     }).join('')}</ul></div>`;
+}
+
+/* Yes/No question. Telegram shows its own popup (tgAsk in the Telegram build); elsewhere an in-page dialog. */
+let modalYes = null;
+function askYesNo(message, onYes) {
+  if (typeof tgAsk === 'function' && tgAsk(message, onYes)) return;
+  const m = $('#modal');
+  $('#modalText').textContent = message;
+  modalYes = onYes;
+  m.hidden = false;
+  m.querySelector('.btn-no').focus();
+}
+function closeModal(answer) {
+  const m = $('#modal');
+  if (m.hidden) return;
+  m.hidden = true;
+  const cb = modalYes; modalYes = null;
+  if (answer === 'yes' && cb) cb();
+}
+$('#modal').addEventListener('click', e => {
+  const b = e.target.closest('[data-answer]');
+  if (b) closeModal(b.dataset.answer);
+  else if (e.target.id === 'modal') closeModal('no');
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('no'); });
+
+async function removeCloudPlans(ids) {
+  const keys = ids.map(id => 'p_' + id);
+  try { ((await csCall('getKeys')) || []).forEach(k => { if (/^p_/.test(k) && !keys.includes(k)) keys.push(k); }); } catch {}
+  for (let i = 0; i < keys.length; i += 50) {
+    const chunk = keys.slice(i, i + 50);
+    if (typeof CS.removeItems === 'function') await csCall('removeItems', chunk);
+    else for (const k of chunk) await csCall('removeItem', k);
+  }
+}
+/* Telegram's own popup with "Так" / "Ні". */
+function tgAsk(message, onYes) {
+  if (!inTG || !tgAt('6.2')) return false;
+  try {
+    tg.showPopup({ message, buttons: [{ id: 'yes', type: 'destructive', text: 'Так' }, { id: 'no', type: 'default', text: 'Ні' }] },
+      id => { if (id === 'yes') onYes(); });
+    return true;
+  } catch { return false; }
+}
+async function clearHistory() {
+  const ids = store.plans.map(p => p.id);
+  if (store.mode === 'tg') {
+    try { await removeCloudPlans(ids); }
+    catch { toast('Не вдалося очистити історію. Перевірте зʼєднання.'); return; }
+  }
+  store.plans = [];
+  if (store.mode !== 'tg') lsSet(LS_PLANS, []);
+  state.current = null;
+  if (state.view === 'result') state.view = 'history';
+  render();
+  if (typeof scheduleSync === 'function') scheduleSync();
+  if (typeof haptic === 'function') haptic('note', 'success');
+  toast('Історію очищено');
 }
 
 async function savePlan(plan) {
@@ -1643,6 +1717,7 @@ el.result.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'fixTime') { e.preventDefault(); const b = el.result.querySelector('[data-act="fix-save"]'); if (b) doAction('fix-save', b); }
 });
 el.history.addEventListener('click', e => {
+  if (e.target.closest('[data-clear]')) { askYesNo('Ви впевнені, що бажаєте очистити історію?', clearHistory); return; }
   const del = e.target.closest('[data-del]');
   if (del) {
     if (inTG && tgAt('6.2')) {
