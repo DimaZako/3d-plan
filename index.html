@@ -599,6 +599,50 @@ function initTg() {
   } catch {}
   try { if (tgAt('8.0')) tg.onEvent('activated', () => { refreshCloud(); tick(); }); } catch {}
 }
+
+/* ================= notifications through the bot =================
+   A minimized Telegram freezes the Mini App, so the push comes from a small server (notify/worker.js):
+   the app sends it the schedule, the server messages the user from the bot when each moment comes. */
+const NOTIFY_URL = '';
+let notifyOn = true, syncT = 0;
+function buildEvents() {
+  const now = Date.now(), horizon = now + 36 * 3600e3, out = [];
+  for (const p of store.plans) {
+    let c;
+    try { c = compute(p); } catch { continue; }
+    for (const x of c.cycles) {
+      const end = at(p.date, x.end);
+      if (end <= now || end > horizon) continue;
+      const name = (c.jobs.length > 1 ? x.job.name : '') || p.name || x.job.name || 'Без назви';
+      const warn = end - WARN_MIN * 60000;
+      if (warn > now) out.push({ id: `${p.id}:${x.n}:w:${x.end}`, at: warn, text: `⏰ ${name} · цикл №${x.n}: залишилось ${WARN_MIN} хв, кінець о ${hhmm(x.end)}` });
+      out.push({ id: `${p.id}:${x.n}:e:${x.end}`, at: end, text: `✅ ${name} · цикл №${x.n} завершено о ${hhmm(x.end)}${x.next ? ' (наступна зміна)' : ''}. Перезапуск: ${x.preset} хв` });
+    }
+  }
+  return out.sort((a, b) => a.at - b.at).slice(0, 300);
+}
+function scheduleSync() {
+  if (!NOTIFY_URL || !inTG || !tg.initData || store.loading) return;
+  clearTimeout(syncT);
+  syncT = setTimeout(syncNotify, 1200);
+}
+async function syncNotify() {
+  try {
+    const r = await fetch(NOTIFY_URL.replace(/\/+$/, '') + '/sync', {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify({ initData: tg.initData, events: notifyOn ? buildEvents() : [] })
+    });
+    state.notifyState = r.ok ? 'ok' : 'error';
+  } catch { state.notifyState = 'error'; }
+  const line = el.result.querySelector('.notify-line');
+  if (line) line.outerHTML = notifyLineHTML();
+}
+function notifyLineHTML() {
+  if (!NOTIFY_URL || !inTG) return '';
+  const err = state.notifyState === 'error' ? ' · <b style="color:#ff9a9a">сервер сповіщень недоступний</b>' : '';
+  const text = notifyOn ? 'Сповіщення в чат бота: за 5 хв до кінця і в кінці кожного циклу' : 'Сповіщення в чат бота вимкнено';
+  return `<p class="fixstats notify-line"><span class="ic">${IC.bell}</span><span>${text}${err}</span><button type="button" class="linkbtn" data-act="notify-toggle">${notifyOn ? 'Вимкнути' : 'Увімкнути'}</button></p>`;
+}
 const LS_PLANS = 'plan3d.plans.v1', LS_DRAFT = 'plan3d.draft.v1';
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
@@ -736,7 +780,7 @@ function renderResult(p, saved) {
         <div class="tile"><div class="k">Останній цикл зміни</div><div class="v">${c.last ? hhmm(c.last.end) : '—'}</div><div class="s">${c.last ? 'кінець циклу №' + c.last.n : 'немає'}</div></div>
         <div class="tile"><div class="k">Запас до кінця зміни</div><div class="v">${c.slack != null ? dur(c.slack) : '—'}</div><div class="s">зміна до ${hhmm(c.e)}</div></div>
       </div>
-      ${saved ? fixStatsHTML(c) : ''}
+      ${saved ? fixStatsHTML(c) : ''}${saved ? notifyLineHTML() : ''}
       ${timelineHTML(c, nowMin)}
       <ol class="cycles">${rowsHTML(c, st)}</ol>
       <div class="actions">
@@ -1295,6 +1339,14 @@ async function doAction(act, btn) {
   if (act === 'txt') { await saveFile(fileBase(p, c) + '.txt', planText(p, c), 'text/plain;charset=utf-8'); return; }
   if (act === 'ics') { await saveFile(fileBase(p, c) + '.ics', icsText(p, c), 'text/calendar;charset=utf-8'); return; }
   if (act === 'png') { const b = await planPNG(p, c); if (b) await saveFile(fileBase(p, c) + '.png', b, 'image/png'); return; }
+  if (act === 'notify-toggle') {
+    notifyOn = !notifyOn;
+    try { await csCall('setItem', 'cfg_notify', notifyOn ? '1' : '0'); } catch {}
+    const line = el.result.querySelector('.notify-line'); if (line) line.outerHTML = notifyLineHTML();
+    toast(notifyOn ? 'Сповіщення в чат бота увімкнено' : 'Сповіщення в чат бота вимкнено');
+    scheduleSync();
+    return;
+  }
   if (act === 'tgshare') {
     try { tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(planText(p, c))); }
     catch { toast('Не вдалося відкрити вибір чату'); }
@@ -1374,6 +1426,7 @@ async function savePlan(plan) {
     lsSet(LS_PLANS, store.plans);
   }
   renderHistory();
+  scheduleSync();
   return true;
 }
 async function deletePlan(id) {
@@ -1384,6 +1437,7 @@ async function deletePlan(id) {
   if (store.mode !== 'tg') lsSet(LS_PLANS, store.plans);
   if (state.current && state.current.id === id) state.current = null;
   renderHistory();
+  scheduleSync();
   haptic('note', 'success');
   toast('План видалено');
 }
@@ -1420,6 +1474,7 @@ async function refreshCloud() {
       });
     }
     store.plans = plans;
+    try { notifyOn = (await csCall('getItem', 'cfg_notify')) !== '0'; } catch {}
     store.note = 'Зберігається в Telegram, однаково на всіх ваших пристроях';
     if (state.current) {
       const upd = plans.find(x => x.id === state.current.id);
@@ -1434,6 +1489,7 @@ async function refreshCloud() {
   store.loading = false;
   refreshing = false;
   renderHistory();
+  scheduleSync();
 }
 
 /* ================= live tick ================= */
