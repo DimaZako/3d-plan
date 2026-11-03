@@ -723,6 +723,7 @@ function syncFormBits() {
   el.harvest.disabled = !el.harvestOn.checked;
   el.partsBox.classList.toggle('is-off', !el.partsOn.checked);
   el.parts.disabled = el.machines.disabled = !el.partsOn.checked;
+  if (!el.partsOn.checked) { el.parts.value = '0'; el.machines.value = '0'; }   // not counted = 0
 }
 function saveDraft() {
   lsSet(LS_DRAFT, { name: el.name.value, shift: el.shift.value, shiftStart: el.shiftStart.value, shiftEnd: el.shiftEnd.value,
@@ -1530,6 +1531,10 @@ async function clearHistory() {
   if (store.mode === 'tg') {
     try { await removeCloudPlans(ids); }
     catch { toast('Не вдалося очистити історію. Перевірте зʼєднання.'); return; }
+  }
+  if (store.mode === 'cloud' && store.col) {      // synced history: delete every saved plan, not just the list on screen
+    try { for (const id of ids) await store.col.doc(id).delete(); }
+    catch { toast('Не вдалося очистити історію. Спробуйте ще раз.'); return; }
   }
   store.plans = [];
   if (store.mode !== 'tg') lsSet(LS_PLANS, []);
