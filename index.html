@@ -187,6 +187,12 @@ details.more .row2{margin-top:14px}
 
 /* cycles */
 .cycles{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.cyc{display:grid;gap:8px}
+.cyc-toggle{appearance:none;display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;min-height:44px;background:none;border:0;color:var(--text);padding:2px;cursor:pointer;font:inherit;text-align:left}
+.cyc-title{font-size:14px;font-weight:700;color:var(--muted)}
+.cyc-more{display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:700;color:var(--accent-ink);white-space:nowrap}
+.cyc-more svg{transition:transform .2s}
+.cyc-toggle[aria-expanded="true"] .cyc-more svg{transform:rotate(180deg)}
 .cy{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
 .cy.multi{border-left:4px solid var(--jc)}
 .cy-n{width:36px;height:36px;border-radius:10px;background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font-family:var(--font-num);font-weight:700;font-size:15px}
@@ -782,7 +788,7 @@ function renderResult(p, saved) {
       </div>
       ${saved ? fixStatsHTML(c) : ''}${saved ? notifyLineHTML() : ''}
       ${timelineHTML(c, nowMin)}
-      <ol class="cycles">${rowsHTML(c, st)}</ol>
+      ${cyclesBlockHTML(c, st, nowMin)}
       <div class="actions">
         <button type="button" class="act" data-act="copy">${IC.copy}Копіювати текст</button>
         <button type="button" class="act" data-act="tgshare" data-needs="tg">${IC.share}Надіслати в чат</button>
@@ -803,11 +809,32 @@ function pauseLabel(x, st) {
   return x.pause ? `пауза/збір ${x.pause} хв` : 'без паузи';
 }
 
-function rowsHTML(c, st) {
+/* The cycle that matters now: running or waiting for its restart; before the shift the first one, after it the last one. */
+function currentCycleN(c, st, nowMin) {
+  if (st) return st.x.n;
+  if (!c.cycles.length) return 0;
+  return nowMin < c.cycles[0].start ? 1 : c.cycles[c.cycles.length - 1].n;
+}
+function cyclesBlockHTML(c, st, nowMin) {
+  const total = c.cycles.length;
+  const curN = currentCycleN(c, st, nowMin);
+  if (total <= 1) return `<ol class="cycles" id="cycleList">${rowsHTML(c, st)}</ol>`;
+  const open = !!state.cyclesOpen;
+  const chevron = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+  return `<div class="cyc">
+    <button type="button" class="cyc-toggle" data-act="cycles" aria-expanded="${open}" aria-controls="cycleList">
+      <span class="cyc-title">${open ? `Усі цикли · ${total}` : `Цикл №${curN} із ${total}`}</span>
+      <span class="cyc-more">${open ? 'Згорнути' : 'Усі цикли'}${chevron}</span>
+    </button>
+    <ol class="cycles" id="cycleList">${rowsHTML(c, st, open ? 0 : curN)}</ol>
+  </div>`;
+}
+function rowsHTML(c, st, onlyN) {
   const multi = c.jobs.length > 1;
   const out = [];
   for (const x of c.cycles) {
-    if (multi && x.n === x.job.from) {
+    if (onlyN && x.n !== onlyN) continue;
+    if (multi && !onlyN && x.n === x.job.from) {
       const j = x.job;
       out.push(`<li class="job-div" style="--jc:${jobColor(x.ji)}"><span class="jd-dot"></span><span><b>${x.ji === 0 ? 'Фігурки' : 'Заміна фігурок'}${j.name ? ': ' + esc(j.name) : ''}</b> · з циклу №${x.n} · друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${j.parts > 1 ? ` · ${j.parts} шт на столі` : ''}</span></li>`);
     }
@@ -1333,6 +1360,7 @@ async function doAction(act, btn) {
     recordFix(n, done); return;
   }
   if (act === 'undo') { undoFix(); return; }
+  if (act === 'cycles') { state.cyclesOpen = !state.cyclesOpen; rerender(); return; }
   const sh = state.shown; if (!sh) return;
   const { p, c } = sh;
   if (act === 'copy') { toast(await copyText(planText(p, c)) ? 'Текст скопійовано' : 'Не вдалося скопіювати'); return; }
