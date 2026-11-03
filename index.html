@@ -253,6 +253,15 @@ details.more .row2{margin-top:14px}
 .hi-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;font-weight:600;color:var(--muted)}
 .hi-meta .pill{display:inline-flex;align-items:center;gap:5px;color:var(--text)}
 .hi-meta .plus{color:var(--next)}
+.hi-meta .ic{display:inline-flex}
+.hi-end{color:var(--muted)}
+.hi-end b{color:var(--text);font-family:var(--font-num);font-weight:700}
+.hi-end sup{font-size:10px;color:var(--muted);margin-left:1px}
+.hl{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:800;padding:3px 8px;border-radius:7px;white-space:nowrap}
+.hl.print{background:var(--accent-soft);color:var(--accent-ink)}
+.hl.soon,.hl.harvest{background:rgba(240,180,76,.16);color:var(--harvest)}
+.hl.over{background:rgba(239,91,91,.16);color:#ff9a9a}
+.hl.wait,.hl.done{background:var(--surface-2);color:var(--muted)}
 .hi-time{font-family:var(--font-num);font-size:12px;color:#6b7188}
 .iconbtn{appearance:none;min-width:44px;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:var(--muted);cursor:pointer;display:grid;place-items:center;font-weight:800;font-size:13px;padding:0 10px}
 .iconbtn:hover{color:var(--text);border-color:var(--accent)}
@@ -661,7 +670,8 @@ function renderView() {
 
 function shiftIcon(key) {
   const k = key === 'night' ? 'moon' : key === 'custom' ? 'custom' : 'sun';
-  return `<span class="ic ic-${k}">${IC[k]}</span>`;
+  const name = key === 'night' ? 'Нічна зміна' : key === 'custom' ? 'Свій графік' : 'Денна зміна';
+  return `<span class="ic ic-${k}" role="img" aria-label="${name}" title="${name}">${IC[k]}</span>`;
 }
 function timeHTML(min, cls) {
   const d = dayOff(min);
@@ -1286,6 +1296,21 @@ async function doAction(act, btn) {
 function rerender() { if (state.view === 'result' && state.current) renderResult(state.current, true); else render(); }
 
 /* ================= history / storage ================= */
+/* Short live status for a history card: time left in the running cycle, the restart, or the start. */
+function histLive(p, c) {
+  const nowMin = nowMinFor(p);
+  let st = phaseAt(c, nowMin, true);
+  if (st && st.phase === 'wait' && st.left > 1440) st = null;
+  if (!st) {
+    const last = c.cycles[c.cycles.length - 1];
+    return last && nowMin >= last.end ? '<span class="hl done">завершено</span>' : '';
+  }
+  if (st.phase === 'print') return `<span class="hl ${st.left <= WARN_MIN ? 'soon' : 'print'}">до кінця циклу №${st.x.n}: ${minsTxt(st.left)}</span>`;
+  if (st.phase === 'harvest') return st.over > 0
+    ? `<span class="hl over">перезапуск №${st.x.n}: +${minsDone(st.over)}</span>`
+    : `<span class="hl harvest">перезапуск №${st.x.n}: ще ${minsTxt(st.left)}</span>`;
+  return `<span class="hl wait">старт через ${minsTxt(st.left)}</span>`;
+}
 function renderHistory() {
   const list = store.plans.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   el.histCount.hidden = !list.length;
@@ -1302,17 +1327,13 @@ function renderHistory() {
     <ul class="hist-list">${list.map(pl => {
       let c;
       try { c = compute(pl, null); } catch { return ''; }
-      const key = c.sh.key;
-      const shLabel = key === 'custom' ? `${hhmm(c.s)}–${hhmm(c.e)}` : key === 'night' ? 'Нічна' : 'Денна';
-      const n = c.inShift.length, j0 = c.jobs[0];
-      const extra = [];
-      if (c.jobs.length > 1) extra.push(`${c.jobs.length} ${plural(c.jobs.length, 'вид', 'види', 'видів')} фігурок`);
-      else extra.push(`старт ${hhmm(pl.start)}, цикл ${dur(j0.printMin)}`);
-      if (c.fixCount) extra.push(`${c.fixCount} ${fixWord(c.fixCount)}`);
+      const j0 = c.jobs[0];
+      const last = c.cycles[c.cycles.length - 1];
+      const endTxt = last ? `${hhmm(last.end)}${dayOff(last.end) > 0 ? `<sup title="наступна доба">+${dayOff(last.end)}</sup>` : ''}` : '—';
       return `<li class="hi">
         <button type="button" class="hi-open" data-open="${esc(pl.id)}">
           <span class="hi-name">${esc(pl.name || j0.name || 'Без назви')}</span>
-          <span class="hi-meta"><span class="pill">${shiftIcon(key)}${esc(shLabel)}</span><span>${n} ${cyclesWord(n)}${c.nextCycle ? ' <span class="plus">+1</span>' : ''}</span>${extra.map(t => `<span>${esc(t)}</span>`).join('')}</span>
+          <span class="hi-meta">${shiftIcon(c.sh.key)}<span class="hi-end">Час завершення <b>${endTxt}</b></span>${histLive(pl, c)}</span>
           <span class="hi-time">${esc(fmtStamp(pl.createdAt))}${pl.updatedAt && pl.updatedAt - pl.createdAt > 60000 ? ' · змінено ' + esc(fmtStamp(pl.updatedAt)) : ''}</span>
         </button>
         <button type="button" class="iconbtn" data-edit="${esc(pl.id)}" aria-label="Редагувати план">${IC.edit}</button>
@@ -1405,6 +1426,10 @@ async function refreshCloud() {
 function tick() {
   liveAlerts();
   syncWakeLock();
+  if (state.view === 'history' && !el.history.hidden && !el.history.querySelector('.armed')) {
+    const m = Math.floor(Date.now() / 60000);
+    if (m !== state.histMin) { state.histMin = m; renderHistory(); }
+  }
   const sh = state.shown;
   if (!sh || el.result.hidden || state.editing || state.fixManual) return;
   const a = document.activeElement;
