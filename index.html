@@ -1328,7 +1328,7 @@ function renderHistory() {
       let c;
       try { c = compute(pl, null); } catch { return ''; }
       const j0 = c.jobs[0];
-      const last = c.cycles[c.cycles.length - 1];
+      const last = c.last;                // last cycle that finishes within the shift (before 20:00 / 08:00)
       const endTxt = last ? `${hhmm(last.end)}${dayOff(last.end) > 0 ? `<sup title="наступна доба">+${dayOff(last.end)}</sup>` : ''}` : '—';
       return `<li class="hi">
         <button type="button" class="hi-open" data-open="${esc(pl.id)}">
