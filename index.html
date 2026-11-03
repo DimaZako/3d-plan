@@ -100,6 +100,7 @@ details.more summary::-webkit-details-marker{display:none}
 details.more summary::before{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:transform .15s}
 details.more[open] summary::before{transform:rotate(45deg)}
 details.more .row2{margin-top:14px}
+.row2.one{grid-template-columns:1fr}
 .form-error{margin:0;padding:10px 12px;border-radius:10px;background:rgba(239,91,91,.12);border:1px solid rgba(239,91,91,.4);color:#ffb4b4;font-size:14px;font-weight:600}
 .primary{appearance:none;width:100%;min-height:54px;border:0;border-radius:14px;background:var(--accent-strong);color:#fff;font-size:16px;font-weight:800;cursor:pointer}
 .primary:hover{background:#6d28d9}
@@ -132,6 +133,7 @@ details.more .row2{margin-top:14px}
 .tile .v{font-family:var(--font-num);font-size:26px;font-weight:700;margin-top:6px;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
 .tile .s{font-size:12px;color:var(--muted);margin-top:4px}
 .tile.accent .v{color:var(--accent-ink)}
+.nw{white-space:nowrap}
 
 .fixstats{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;font-size:13px;font-weight:600;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
 .fixstats b{color:var(--text)}
@@ -331,9 +333,15 @@ details.more .row2{margin-top:14px}
         <summary>Додатково</summary>
         <div class="row2">
           <div>
-            <label class="lbl" for="fParts">Деталей за цикл</label>
+            <label class="lbl" for="fParts">Деталей на столі</label>
             <div class="unit"><input class="inp" id="fParts" type="number" inputmode="numeric" min="1" max="9999" data-max="9999" value="1"><span class="u">шт</span></div>
           </div>
+          <div>
+            <label class="lbl" for="fMachines">Задіяна техніка</label>
+            <div class="unit"><input class="inp" id="fMachines" type="number" inputmode="numeric" min="1" max="999" data-max="999" value="1"><span class="u">од.</span></div>
+          </div>
+        </div>
+        <div class="row2 one">
           <div>
             <label class="lbl" for="fDate">Дата зміни</label>
             <input class="inp" id="fDate" type="date">
@@ -491,8 +499,8 @@ function compute(p) {
     nextCycle: cycles.find(c => c.next) || null,
     slack: last ? e - last.end : null,
     printTotal: inShift.reduce((a, x) => a + x.P, 0),
-    parts: inShift.reduce((a, x) => a + x.job.parts, 0),
-    anyParts: jobs.some(j => j.parts > 1),
+    machines: Math.min(Math.max(int(p.machines) || 1, 1), 999),
+    parts: inShift.reduce((a, x) => a + x.job.parts, 0) * Math.min(Math.max(int(p.machines) || 1, 1), 999),
     fixCount: fixes.size,
     early: t < s, late: t >= e
   };
@@ -516,7 +524,7 @@ const el = {
   form: $('#planForm'), name: $('#fName'), shift: $('#fShift'), customShift: $('#customShift'),
   shiftStart: $('#fShiftStart'), shiftEnd: $('#fShiftEnd'), start: $('#fStart'), now: $('#btnNow'),
   h: $('#fH'), m: $('#fM'), harvestOn: $('#fHarvestOn'), harvest: $('#fHarvest'), harvestBox: $('#harvestBox'),
-  parts: $('#fParts'), date: $('#fDate'), more: $('#more'), err: $('#formError'),
+  parts: $('#fParts'), machines: $('#fMachines'), date: $('#fDate'), more: $('#more'), err: $('#formError'),
   result: $('#resultView'), history: $('#historyView'),
   tabNew: $('#tabNew'), tabHist: $('#tabHistory'), histCount: $('#histCount'), toast: $('#toast')
 };
@@ -619,6 +627,7 @@ function readForm() {
     harvestOn: el.harvestOn.checked,
     harvestMin: Math.min(int(el.harvest.value), 1440),
     parts: Math.min(Math.max(int(el.parts.value), 1), 9999),
+    machines: Math.min(Math.max(int(el.machines.value), 1), 999),
     date: validIso(el.date.value) ? el.date.value : defaultDate()
   };
   let error = '';
@@ -637,7 +646,7 @@ function syncFormBits() {
 }
 function saveDraft() {
   lsSet(LS_DRAFT, { name: el.name.value, shift: el.shift.value, shiftStart: el.shiftStart.value, shiftEnd: el.shiftEnd.value,
-    start: el.start.value, h: el.h.value, m: el.m.value, harvestOn: el.harvestOn.checked, harvest: el.harvest.value, parts: el.parts.value });
+    start: el.start.value, h: el.h.value, m: el.m.value, harvestOn: el.harvestOn.checked, harvest: el.harvest.value, parts: el.parts.value, machines: el.machines.value });
 }
 function loadDraft() {
   const d = lsGet(LS_DRAFT, null);
@@ -646,8 +655,8 @@ function loadDraft() {
   set(el.name, d.name); if (d.shift in SHIFTS || d.shift === 'custom') el.shift.value = d.shift;
   set(el.shiftStart, d.shiftStart); set(el.shiftEnd, d.shiftEnd); set(el.start, d.start);
   set(el.h, d.h); set(el.m, d.m); if (typeof d.harvestOn === 'boolean') el.harvestOn.checked = d.harvestOn;
-  set(el.harvest, d.harvest); set(el.parts, d.parts);
-  if (int(d.parts) > 1) el.more.open = true;
+  set(el.harvest, d.harvest); set(el.parts, d.parts); set(el.machines, d.machines);
+  if (int(d.parts) > 1 || int(d.machines) > 1) el.more.open = true;
 }
 
 /* ================= rendering ================= */
@@ -703,9 +712,9 @@ function renderResult(p, saved) {
     ? `${c.jobs.length} ${plural(c.jobs.length, 'вид', 'види', 'видів')} фігурок`
     : `цикл ${dur(j0.printMin)}${j0.harvestOn && j0.harvestMin ? `, збір ${j0.harvestMin} хв` : ', без збору'}`;
 
-  const tile2 = c.anyParts
-    ? `<div class="tile"><div class="k">Деталей за зміну</div><div class="v">${c.parts}</div><div class="s">за ${N} ${cyclesWord(N)}</div></div>`
-    : `<div class="tile"><div class="k">Друк за зміну</div><div class="v">${dur(c.printTotal)}</div><div class="s">${Math.round(c.printTotal / (c.e - c.s) * 100)}% часу зміни</div></div>`;
+  const sameParts = c.jobs.every(j => j.parts === j0.parts);
+  const perCycle = sameParts ? `<span class="nw">по ${j0.parts * c.machines} за цикл</span> <span class="nw">(${j0.parts} шт × ${c.machines} од.)</span>` : `${c.machines} од. техніки`;
+  const tile2 = `<div class="tile"><div class="k">Деталей за зміну</div><div class="v">${c.parts}</div><div class="s">${perCycle}</div></div>`;
 
   el.result.innerHTML = `
     <article class="res">
@@ -756,7 +765,7 @@ function rowsHTML(c, st) {
   for (const x of c.cycles) {
     if (multi && x.n === x.job.from) {
       const j = x.job;
-      out.push(`<li class="job-div" style="--jc:${jobColor(x.ji)}"><span class="jd-dot"></span><span><b>${x.ji === 0 ? 'Фігурки' : 'Заміна фігурок'}${j.name ? ': ' + esc(j.name) : ''}</b> · з циклу №${x.n} · друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${j.parts > 1 ? ` · ${j.parts} шт` : ''}</span></li>`);
+      out.push(`<li class="job-div" style="--jc:${jobColor(x.ji)}"><span class="jd-dot"></span><span><b>${x.ji === 0 ? 'Фігурки' : 'Заміна фігурок'}${j.name ? ': ' + esc(j.name) : ''}</b> · з циклу №${x.n} · друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${j.parts > 1 ? ` · ${j.parts} шт на столі` : ''}</span></li>`);
     }
     let cls = '', chip = '';
     if (st) {
@@ -870,7 +879,7 @@ function edFromPlan(p) {
     shift: p.shift in SHIFTS || p.shift === 'custom' ? p.shift : 'day',
     shiftStart: hhmm(p.shiftStart != null ? p.shiftStart : 540),
     shiftEnd: hhmm(p.shiftEnd != null ? p.shiftEnd : 1080),
-    date: p.date, start: hhmm(p.start),
+    date: p.date, start: hhmm(p.start), machines: String(Math.max(1, int(p.machines) || 1)),
     jobs: jobsOf(p).map(j => ({ from: String(j.from), name: j.name, h: String(Math.floor(j.printMin / 60)), m: String(j.printMin % 60), harvest: String(j.harvestOn ? j.harvestMin : 0), parts: String(j.parts) }))
   };
 }
@@ -888,7 +897,7 @@ function editorHTML(ed) {
         <div><label class="lbl" for="jH${i}">Друк, год</label><div class="unit"><input class="inp" id="jH${i}" data-k="h" type="number" inputmode="numeric" min="0" max="24" data-max="24" data-role="h" value="${esc(j.h)}"><span class="u">год</span></div></div>
         <div><label class="lbl" for="jM${i}">Друк, хв</label><div class="unit"><input class="inp" id="jM${i}" data-k="m" type="number" inputmode="numeric" min="0" max="59" data-max="59" data-role="m" value="${esc(j.m)}"><span class="u">хв</span></div></div>
         <div><label class="lbl" for="jHv${i}">Перезапуск, хв</label><div class="unit"><input class="inp" id="jHv${i}" data-k="harvest" type="number" inputmode="numeric" min="0" max="600" data-max="600" value="${esc(j.harvest)}"><span class="u">хв</span></div></div>
-        <div><label class="lbl" for="jP${i}">Деталей за цикл</label><div class="unit"><input class="inp" id="jP${i}" data-k="parts" type="number" inputmode="numeric" min="1" max="9999" data-max="9999" value="${esc(j.parts)}"><span class="u">шт</span></div></div>
+        <div><label class="lbl" for="jP${i}">Деталей на столі</label><div class="unit"><input class="inp" id="jP${i}" data-k="parts" type="number" inputmode="numeric" min="1" max="9999" data-max="9999" value="${esc(j.parts)}"><span class="u">шт</span></div></div>
       </div>
     </li>`).join('');
   return `<section class="editor" id="editor" aria-label="Редагування плану">
@@ -903,6 +912,9 @@ function editorHTML(ed) {
       <div class="row2">
         <div><label class="lbl" for="eDate">Дата зміни</label><input class="inp" id="eDate" type="date" value="${esc(ed.date)}"></div>
         <div><label class="lbl" for="eStart">Початок друку</label><input class="inp" id="eStart" type="time" value="${esc(ed.start)}"></div>
+      </div>
+      <div class="row2">
+        <div><label class="lbl" for="eMachines">Задіяна техніка</label><div class="unit"><input class="inp" id="eMachines" type="number" inputmode="numeric" min="1" max="999" data-max="999" value="${esc(ed.machines)}"><span class="u">од.</span></div></div>
       </div>
     </div>
     <ol class="jobs">${jobs}</ol>
@@ -920,7 +932,7 @@ function readEditor() {
   if (!ed || !root) return ed;
   const v = id => { const n = root.querySelector('#' + id); return n ? n.value : ''; };
   ed.shift = v('eShift'); ed.shiftStart = v('eShiftStart'); ed.shiftEnd = v('eShiftEnd');
-  ed.date = v('eDate'); ed.start = v('eStart');
+  ed.date = v('eDate'); ed.start = v('eStart'); ed.machines = v('eMachines');
   root.querySelectorAll('.job').forEach(li => {
     const j = ed.jobs[Number(li.dataset.j)];
     if (!j) return;
@@ -966,6 +978,7 @@ function editorToPlan(ed, base) {
   const j0 = jobs[0];
   return { plan: Object.assign({}, base, {
     shift: ed.shift, shiftStart, shiftEnd, date: ed.date, start, jobs,
+    machines: Math.min(Math.max(int(ed.machines) || 1, 1), 999),
     name: j0.name, printMin: j0.printMin, harvestOn: j0.harvestOn, harvestMin: j0.harvestMin, parts: j0.parts,
     updatedAt: Date.now(), v: 2
   }) };
@@ -1096,18 +1109,19 @@ async function syncWakeLock() {
 function planText(p, c) {
   const N = c.inShift.length, multi = c.jobs.length > 1;
   const L = [`3D План · ${p.name || c.jobs[0].name || 'Без назви'}`, `${c.sh.label} ${hhmm(c.s)}–${hhmm(c.e)} · ${fmtDate(p.date)}`];
-  if (!multi) { const j = c.jobs[0]; L.push(`Друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${j.parts > 1 ? ` · ${j.parts} шт/цикл` : ''}`); }
+  if (!multi) { const j = c.jobs[0]; L.push(`Друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв · на столі ${j.parts} шт · техніки ${c.machines} од.`); }
+  else L.push(`Техніки: ${c.machines} од.`);
   L.push('');
   for (const x of c.cycles) {
     if (multi && x.n === x.job.from) {
       const j = x.job;
-      L.push(`${x.ji ? '— Заміна' : '— Фігурки'}${j.name ? ': ' + j.name : ''} (з №${x.n}, друк ${dur(j.printMin)}, збір ${j.harvestOn ? j.harvestMin : 0} хв)`);
+      L.push(`${x.ji ? '— Заміна' : '— Фігурки'}${j.name ? ': ' + j.name : ''} (з №${x.n}, друк ${dur(j.printMin)}, збір ${j.harvestOn ? j.harvestMin : 0} хв, на столі ${j.parts} шт)`);
     }
     const pz = x.kind === 'actual' ? `пауза/збір ${x.pause} хв ✓ факт` : x.pause ? `пауза/збір ${x.pause} хв` : '';
     L.push(`Цикл №${x.n}: ${hhmm(x.start)} → ${hhmm(x.end)}${pz ? ' · ' + pz : ''}${x.next ? '  (наст. зміна)' : ''}`);
   }
   L.push('');
-  L.push(`У зміні: ${N} ${cyclesWord(N)}${c.anyParts ? `, ${c.parts} шт` : ''}${c.last ? `, останній до ${hhmm(c.last.end)}, запас ${dur(c.slack)}` : ''}`);
+  L.push(`У зміні: ${N} ${cyclesWord(N)}, деталей ${c.parts} шт${c.last ? `, останній до ${hhmm(c.last.end)}, запас ${dur(c.slack)}` : ''}`);
   return L.join('\n');
 }
 function fileBase(p, c) {
@@ -1163,7 +1177,7 @@ async function planPNG(p, c) {
   g.fillStyle = '#8a90a6'; g.font = `600 28px ${UI}`;
   g.fillText(fit(`${c.sh.label} ${hhmm(c.s)}–${hhmm(c.e)} · ${fmtDate(p.date)}`, W - 2 * PX), PX, 206);
   const j0 = c.jobs[0];
-  g.fillText(fit(multi ? `${c.jobs.length} види фігурок` : `Друк ${dur(j0.printMin)} · збір ${j0.harvestOn ? j0.harvestMin : 0} хв${j0.parts > 1 ? ` · ${j0.parts} шт/цикл` : ''}`, W - 2 * PX), PX, 250);
+  g.fillText(fit(multi ? `${c.jobs.length} види фігурок` : `Друк ${dur(j0.printMin)} · збір ${j0.harvestOn ? j0.harvestMin : 0} хв · ${j0.parts} шт × ${c.machines} од.`, W - 2 * PX), PX, 250);
   let y = HEAD;
   for (const it of items) {
     if (!it.x) {
@@ -1200,7 +1214,7 @@ async function planPNG(p, c) {
   const N = c.inShift.length;
   y += 40;
   g.fillStyle = '#eceef5'; g.font = `800 34px ${UI}`;
-  g.fillText(fit(`У зміні: ${N} ${cyclesWord(N)}${c.anyParts ? ` · ${c.parts} шт` : ''}`, W - 2 * PX), PX, y);
+  g.fillText(fit(`У зміні: ${N} ${cyclesWord(N)} · ${c.parts} деталей`, W - 2 * PX), PX, y);
   g.fillStyle = '#8a90a6'; g.font = `600 26px ${UI}`;
   g.fillText(fit(c.last ? `Останній цикл зміни до ${hhmm(c.last.end)} · запас ${dur(c.slack)}` : 'Жоден цикл не вкладається у зміну', W - 2 * PX), PX, y + 46);
   return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
@@ -1527,7 +1541,7 @@ setInterval(tick, 10000);
 /* ================= start ================= */
 initTg();
 loadDraft();
-[el.h, el.m, el.harvest, el.parts].forEach(clampField);
+[el.h, el.m, el.harvest, el.parts, el.machines].forEach(clampField);
 el.date.value = defaultDate();
 syncFormBits();
 render();
