@@ -100,6 +100,9 @@ details.more summary::-webkit-details-marker{display:none}
 details.more summary::before{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:transform .15s}
 details.more[open] summary::before{transform:rotate(45deg)}
 details.more .row2{margin-top:14px}
+details.more .parts-box{margin-top:14px}
+details.more .parts-box .row2{margin-top:0}
+.box.is-off .lbl{opacity:.5}
 .row2.one{grid-template-columns:1fr}
 .form-error{margin:0;padding:10px 12px;border-radius:10px;background:rgba(239,91,91,.12);border:1px solid rgba(239,91,91,.4);color:#ffb4b4;font-size:14px;font-weight:600}
 .primary{appearance:none;width:100%;min-height:54px;border:0;border-radius:14px;background:var(--accent-strong);color:#fff;font-size:16px;font-weight:800;cursor:pointer}
@@ -337,14 +340,17 @@ details.more .row2{margin-top:14px}
       </div>
       <details class="more" id="more">
         <summary>Додатково</summary>
-        <div class="row2">
-          <div>
-            <label class="lbl" for="fParts">Деталей на столі</label>
-            <div class="unit"><input class="inp" id="fParts" type="number" inputmode="numeric" min="1" max="9999" data-max="9999" value="1"><span class="u">шт</span></div>
-          </div>
-          <div>
-            <label class="lbl" for="fMachines">Задіяна техніка</label>
-            <div class="unit"><input class="inp" id="fMachines" type="number" inputmode="numeric" min="1" max="999" data-max="999" value="1"><span class="u">од.</span></div>
+        <div class="box is-off parts-box" id="partsBox">
+          <label class="check" for="fPartsOn"><input id="fPartsOn" type="checkbox"><span class="tick"></span>Рахувати деталі</label>
+          <div class="row2">
+            <div>
+              <label class="lbl" for="fParts">Деталей на столі</label>
+              <div class="unit"><input class="inp" id="fParts" type="number" inputmode="numeric" min="0" max="9999" data-max="9999" value="0" disabled><span class="u">шт</span></div>
+            </div>
+            <div>
+              <label class="lbl" for="fMachines">Задіяна техніка</label>
+              <div class="unit"><input class="inp" id="fMachines" type="number" inputmode="numeric" min="0" max="999" data-max="999" value="0" disabled><span class="u">од.</span></div>
+            </div>
           </div>
         </div>
         <div class="row2 one">
@@ -394,6 +400,9 @@ const cyclesWord = n => plural(n, 'цикл', 'цикли', 'циклів');
 const fixWord = n => plural(n, 'фіксація', 'фіксації', 'фіксацій');
 const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const int = v => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? n : 0; };
+/* Parts are counted only when the person switched it on; older plans count when they had real numbers. */
+const countsParts = p => p.countParts === true || (p.countParts !== false
+  && (int(p.parts) > 1 || int(p.machines) > 1 || (Array.isArray(p.jobs) && p.jobs.some(j => int(j.parts) > 1))));
 /* Print time of one cycle: hours 0-24, minutes 0-59, never more than 24:00 in total. */
 const printMinOf = (h, m) => Math.min(Math.min(int(h), 24) * 60 + Math.min(int(m), 59), 1440);
 /* Keep number fields inside their limits while typing: digits only, capped at data-max; 24 h forces 0 min. */
@@ -505,6 +514,7 @@ function compute(p) {
     nextCycle: cycles.find(c => c.next) || null,
     slack: last ? e - last.end : null,
     printTotal: inShift.reduce((a, x) => a + x.P, 0),
+    countParts: countsParts(p),
     machines: Math.min(Math.max(int(p.machines) || 1, 1), 999),
     parts: inShift.reduce((a, x) => a + x.job.parts, 0) * Math.min(Math.max(int(p.machines) || 1, 1), 999),
     fixCount: fixes.size,
@@ -530,7 +540,7 @@ const el = {
   form: $('#planForm'), name: $('#fName'), shift: $('#fShift'), customShift: $('#customShift'),
   shiftStart: $('#fShiftStart'), shiftEnd: $('#fShiftEnd'), start: $('#fStart'), now: $('#btnNow'),
   h: $('#fH'), m: $('#fM'), harvestOn: $('#fHarvestOn'), harvest: $('#fHarvest'), harvestBox: $('#harvestBox'),
-  parts: $('#fParts'), machines: $('#fMachines'), date: $('#fDate'), more: $('#more'), err: $('#formError'),
+  partsOn: $('#fPartsOn'), partsBox: $('#partsBox'), parts: $('#fParts'), machines: $('#fMachines'), date: $('#fDate'), more: $('#more'), err: $('#formError'),
   result: $('#resultView'), history: $('#historyView'),
   tabNew: $('#tabNew'), tabHist: $('#tabHistory'), histCount: $('#histCount'), toast: $('#toast')
 };
@@ -676,8 +686,9 @@ function readForm() {
     printMin: printMinOf(el.h.value, el.m.value),
     harvestOn: el.harvestOn.checked,
     harvestMin: Math.min(int(el.harvest.value), 1440),
-    parts: Math.min(Math.max(int(el.parts.value), 1), 9999),
-    machines: Math.min(Math.max(int(el.machines.value), 1), 999),
+    countParts: el.partsOn.checked,
+    parts: Math.min(int(el.parts.value), 9999),
+    machines: Math.min(int(el.machines.value), 999),
     date: validIso(el.date.value) ? el.date.value : defaultDate()
   };
   let error = '';
@@ -687,16 +698,19 @@ function readForm() {
   }
   if (!error && p.start == null) error = 'Вкажіть час початку друку.';
   if (!error && p.printMin < 1) error = 'Вкажіть час друку одного циклу: хоча б 1 хвилину.';
+  if (!error && p.countParts && (p.parts < 1 || p.machines < 1)) error = 'Вкажіть кількість деталей на столі та задіяної техніки (від 1) або зніміть галочку «Рахувати деталі».';
   return { p, error };
 }
 function syncFormBits() {
   el.customShift.hidden = el.shift.value !== 'custom';
   el.harvestBox.classList.toggle('is-off', !el.harvestOn.checked);
   el.harvest.disabled = !el.harvestOn.checked;
+  el.partsBox.classList.toggle('is-off', !el.partsOn.checked);
+  el.parts.disabled = el.machines.disabled = !el.partsOn.checked;
 }
 function saveDraft() {
   lsSet(LS_DRAFT, { name: el.name.value, shift: el.shift.value, shiftStart: el.shiftStart.value, shiftEnd: el.shiftEnd.value,
-    start: el.start.value, h: el.h.value, m: el.m.value, harvestOn: el.harvestOn.checked, harvest: el.harvest.value, parts: el.parts.value, machines: el.machines.value });
+    start: el.start.value, h: el.h.value, m: el.m.value, harvestOn: el.harvestOn.checked, harvest: el.harvest.value, partsOn: el.partsOn.checked, parts: el.parts.value, machines: el.machines.value });
 }
 function loadDraft() {
   const d = lsGet(LS_DRAFT, null);
@@ -705,8 +719,11 @@ function loadDraft() {
   set(el.name, d.name); if (d.shift in SHIFTS || d.shift === 'custom') el.shift.value = d.shift;
   set(el.shiftStart, d.shiftStart); set(el.shiftEnd, d.shiftEnd); set(el.start, d.start);
   set(el.h, d.h); set(el.m, d.m); if (typeof d.harvestOn === 'boolean') el.harvestOn.checked = d.harvestOn;
-  set(el.harvest, d.harvest); set(el.parts, d.parts); set(el.machines, d.machines);
-  if (int(d.parts) > 1 || int(d.machines) > 1) el.more.open = true;
+  set(el.harvest, d.harvest);
+  if (typeof d.partsOn === 'boolean') {            // older drafts had no switch: keep the new defaults (off, 0)
+    el.partsOn.checked = d.partsOn; set(el.parts, d.parts); set(el.machines, d.machines);
+    if (d.partsOn) el.more.open = true;
+  }
 }
 
 /* ================= rendering ================= */
@@ -770,7 +787,9 @@ function renderResult(p, saved) {
 
   const sameParts = c.jobs.every(j => j.parts === j0.parts);
   const perCycle = sameParts ? `<span class="nw">по ${j0.parts * c.machines} за цикл</span> <span class="nw">(${j0.parts} шт × ${c.machines} од.)</span>` : `${c.machines} од. техніки`;
-  const tile2 = `<div class="tile"><div class="k">Деталей за зміну</div><div class="v">${c.parts}</div><div class="s">${perCycle}</div></div>`;
+  const tile2 = c.countParts
+    ? `<div class="tile"><div class="k">Деталей за зміну</div><div class="v">${c.parts}</div><div class="s">${perCycle}</div></div>`
+    : `<div class="tile"><div class="k">Друк за зміну</div><div class="v">${dur(c.printTotal)}</div><div class="s">${Math.round(c.printTotal / (c.e - c.s) * 100)}% часу зміни</div></div>`;
 
   el.result.innerHTML = `
     <article class="res">
@@ -842,7 +861,7 @@ function rowsHTML(c, st, onlyN) {
     if (onlyN && x.n !== onlyN) continue;
     if (multi && !onlyN && x.n === x.job.from) {
       const j = x.job;
-      out.push(`<li class="job-div" style="--jc:${jobColor(x.ji)}"><span class="jd-dot"></span><span><b>${x.ji === 0 ? 'Фігурки' : 'Заміна фігурок'}${j.name ? ': ' + esc(j.name) : ''}</b> · з циклу №${x.n} · друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${j.parts > 1 ? ` · ${j.parts} шт на столі` : ''}</span></li>`);
+      out.push(`<li class="job-div" style="--jc:${jobColor(x.ji)}"><span class="jd-dot"></span><span><b>${x.ji === 0 ? 'Фігурки' : 'Заміна фігурок'}${j.name ? ': ' + esc(j.name) : ''}</b> · з циклу №${x.n} · друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${c.countParts ? ` · ${j.parts} шт на столі` : ''}</span></li>`);
     }
     let cls = '', chip = '';
     if (st) {
@@ -956,8 +975,8 @@ function edFromPlan(p) {
     shift: p.shift in SHIFTS || p.shift === 'custom' ? p.shift : 'day',
     shiftStart: hhmm(p.shiftStart != null ? p.shiftStart : 540),
     shiftEnd: hhmm(p.shiftEnd != null ? p.shiftEnd : 1080),
-    date: p.date, start: hhmm(p.start), machines: String(Math.max(1, int(p.machines) || 1)),
-    jobs: jobsOf(p).map(j => ({ from: String(j.from), name: j.name, h: String(Math.floor(j.printMin / 60)), m: String(j.printMin % 60), harvest: String(j.harvestOn ? j.harvestMin : 0), parts: String(j.parts) }))
+    date: p.date, start: hhmm(p.start), countParts: countsParts(p), machines: countsParts(p) ? String(Math.max(1, int(p.machines) || 1)) : '0',
+    jobs: jobsOf(p).map(j => ({ from: String(j.from), name: j.name, h: String(Math.floor(j.printMin / 60)), m: String(j.printMin % 60), harvest: String(j.harvestOn ? j.harvestMin : 0), parts: countsParts(p) ? String(j.parts) : '0' }))
   };
 }
 function editorHTML(ed) {
@@ -974,7 +993,7 @@ function editorHTML(ed) {
         <div><label class="lbl" for="jH${i}">Друк, год</label><div class="unit"><input class="inp" id="jH${i}" data-k="h" type="number" inputmode="numeric" min="0" max="24" data-max="24" data-role="h" value="${esc(j.h)}"><span class="u">год</span></div></div>
         <div><label class="lbl" for="jM${i}">Друк, хв</label><div class="unit"><input class="inp" id="jM${i}" data-k="m" type="number" inputmode="numeric" min="0" max="59" data-max="59" data-role="m" value="${esc(j.m)}"><span class="u">хв</span></div></div>
         <div><label class="lbl" for="jHv${i}">Перезапуск, хв</label><div class="unit"><input class="inp" id="jHv${i}" data-k="harvest" type="number" inputmode="numeric" min="0" max="600" data-max="600" value="${esc(j.harvest)}"><span class="u">хв</span></div></div>
-        <div><label class="lbl" for="jP${i}">Деталей на столі</label><div class="unit"><input class="inp" id="jP${i}" data-k="parts" type="number" inputmode="numeric" min="1" max="9999" data-max="9999" value="${esc(j.parts)}"><span class="u">шт</span></div></div>
+        ${ed.countParts ? `<div><label class="lbl" for="jP${i}">Деталей на столі</label><div class="unit"><input class="inp" id="jP${i}" data-k="parts" type="number" inputmode="numeric" min="0" max="9999" data-max="9999" value="${esc(j.parts)}"><span class="u">шт</span></div></div>` : ''}
       </div>
     </li>`).join('');
   return `<section class="editor" id="editor" aria-label="Редагування плану">
@@ -990,8 +1009,11 @@ function editorHTML(ed) {
         <div><label class="lbl" for="eDate">Дата зміни</label><input class="inp" id="eDate" type="date" value="${esc(ed.date)}"></div>
         <div><label class="lbl" for="eStart">Початок друку</label><input class="inp" id="eStart" type="time" value="${esc(ed.start)}"></div>
       </div>
-      <div class="row2">
-        <div><label class="lbl" for="eMachines">Задіяна техніка</label><div class="unit"><input class="inp" id="eMachines" type="number" inputmode="numeric" min="1" max="999" data-max="999" value="${esc(ed.machines)}"><span class="u">од.</span></div></div>
+      <div class="box${ed.countParts ? '' : ' is-off'}">
+        <label class="check" for="eCountParts"><input id="eCountParts" type="checkbox"${ed.countParts ? ' checked' : ''}><span class="tick"></span>Рахувати деталі</label>
+        <div class="row2">
+          <div><label class="lbl" for="eMachines">Задіяна техніка</label><div class="unit"><input class="inp" id="eMachines" type="number" inputmode="numeric" min="0" max="999" data-max="999" value="${esc(ed.machines)}"${ed.countParts ? '' : ' disabled'}><span class="u">од.</span></div></div>
+        </div>
       </div>
     </div>
     <ol class="jobs">${jobs}</ol>
@@ -1010,6 +1032,7 @@ function readEditor() {
   const v = id => { const n = root.querySelector('#' + id); return n ? n.value : ''; };
   ed.shift = v('eShift'); ed.shiftStart = v('eShiftStart'); ed.shiftEnd = v('eShiftEnd');
   ed.date = v('eDate'); ed.start = v('eStart'); ed.machines = v('eMachines');
+  const cp = root.querySelector('#eCountParts'); if (cp) ed.countParts = cp.checked;
   root.querySelectorAll('.job').forEach(li => {
     const j = ed.jobs[Number(li.dataset.j)];
     if (!j) return;
@@ -1037,6 +1060,7 @@ function editorToPlan(ed, base) {
   const start = parseTime(ed.start);
   if (start == null) return err('Вкажіть час початку друку.');
   if (!validIso(ed.date)) return err('Вкажіть дату зміни.');
+  if (ed.countParts && int(ed.machines) < 1) return err('Вкажіть кількість задіяної техніки (від 1) або зніміть галочку «Рахувати деталі».');
   const seen = new Set();
   const jobs = [];
   for (let i = 0; i < ed.jobs.length; i++) {
@@ -1049,13 +1073,14 @@ function editorToPlan(ed, base) {
     const printMin = printMinOf(j.h, j.m);
     if (printMin < 1) return err(`${label}: вкажіть час друку.`);
     const hv = Math.min(int(j.harvest), 1440);
-    jobs.push({ from, name: String(j.name || '').trim().slice(0, 60), printMin, harvestOn: hv > 0, harvestMin: hv, parts: Math.max(1, int(j.parts) || 1) });
+    if (ed.countParts && int(j.parts) < 1) return err(`${label}: вкажіть кількість деталей на столі (від 1).`);
+    jobs.push({ from, name: String(j.name || '').trim().slice(0, 60), printMin, harvestOn: hv > 0, harvestMin: hv, parts: ed.countParts ? int(j.parts) : 0 });
   }
   jobs.sort((a, b) => a.from - b.from);
   const j0 = jobs[0];
   return { plan: Object.assign({}, base, {
     shift: ed.shift, shiftStart, shiftEnd, date: ed.date, start, jobs,
-    machines: Math.min(Math.max(int(ed.machines) || 1, 1), 999),
+    countParts: !!ed.countParts, machines: ed.countParts ? Math.min(int(ed.machines), 999) : 0,
     name: j0.name, printMin: j0.printMin, harvestOn: j0.harvestOn, harvestMin: j0.harvestMin, parts: j0.parts,
     updatedAt: Date.now(), v: 2
   }) };
@@ -1186,19 +1211,19 @@ async function syncWakeLock() {
 function planText(p, c) {
   const N = c.inShift.length, multi = c.jobs.length > 1;
   const L = [`3D План · ${p.name || c.jobs[0].name || 'Без назви'}`, `${c.sh.label} ${hhmm(c.s)}–${hhmm(c.e)} · ${shiftDates(p, c)}`];
-  if (!multi) { const j = c.jobs[0]; L.push(`Друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв · на столі ${j.parts} шт · техніки ${c.machines} од.`); }
-  else L.push(`Техніки: ${c.machines} од.`);
+  if (!multi) { const j = c.jobs[0]; L.push(`Друк ${dur(j.printMin)} · збір ${j.harvestOn ? j.harvestMin : 0} хв${c.countParts ? ` · на столі ${j.parts} шт · техніки ${c.machines} од.` : ''}`); }
+  else if (c.countParts) L.push(`Техніки: ${c.machines} од.`);
   L.push('');
   for (const x of c.cycles) {
     if (multi && x.n === x.job.from) {
       const j = x.job;
-      L.push(`${x.ji ? '— Заміна' : '— Фігурки'}${j.name ? ': ' + j.name : ''} (з №${x.n}, друк ${dur(j.printMin)}, збір ${j.harvestOn ? j.harvestMin : 0} хв, на столі ${j.parts} шт)`);
+      L.push(`${x.ji ? '— Заміна' : '— Фігурки'}${j.name ? ': ' + j.name : ''} (з №${x.n}, друк ${dur(j.printMin)}, збір ${j.harvestOn ? j.harvestMin : 0} хв${c.countParts ? `, на столі ${j.parts} шт` : ''})`);
     }
     const pz = x.kind === 'actual' ? `пауза/збір ${x.pause} хв ✓ факт` : x.pause ? `пауза/збір ${x.pause} хв` : '';
     L.push(`Цикл №${x.n}: ${hhmm(x.start)} → ${hhmm(x.end)}${pz ? ' · ' + pz : ''}${x.next ? '  (наст. зміна)' : ''}`);
   }
   L.push('');
-  L.push(`У зміні: ${N} ${cyclesWord(N)}, деталей ${c.parts} шт${c.last ? `, останній до ${hhmm(c.last.end)}, запас ${dur(c.slack)}` : ''}`);
+  L.push(`У зміні: ${N} ${cyclesWord(N)}${c.countParts ? `, деталей ${c.parts} шт` : ''}${c.last ? `, останній до ${hhmm(c.last.end)}, запас ${dur(c.slack)}` : ''}`);
   return L.join('\n');
 }
 function fileBase(p, c) {
@@ -1254,7 +1279,7 @@ async function planPNG(p, c) {
   g.fillStyle = '#8a90a6'; g.font = `600 28px ${UI}`;
   g.fillText(fit(`${c.sh.label} ${hhmm(c.s)}–${hhmm(c.e)} · ${shiftDates(p, c)}`, W - 2 * PX), PX, 206);
   const j0 = c.jobs[0];
-  g.fillText(fit(multi ? `${c.jobs.length} види фігурок` : `Друк ${dur(j0.printMin)} · збір ${j0.harvestOn ? j0.harvestMin : 0} хв · ${j0.parts} шт × ${c.machines} од.`, W - 2 * PX), PX, 250);
+  g.fillText(fit(multi ? `${c.jobs.length} види фігурок` : `Друк ${dur(j0.printMin)} · збір ${j0.harvestOn ? j0.harvestMin : 0} хв${c.countParts ? ` · ${j0.parts} шт × ${c.machines} од.` : ''}`, W - 2 * PX), PX, 250);
   let y = HEAD;
   for (const it of items) {
     if (!it.x) {
@@ -1291,7 +1316,7 @@ async function planPNG(p, c) {
   const N = c.inShift.length;
   y += 40;
   g.fillStyle = '#eceef5'; g.font = `800 34px ${UI}`;
-  g.fillText(fit(`У зміні: ${N} ${cyclesWord(N)} · ${c.parts} деталей`, W - 2 * PX), PX, y);
+  g.fillText(fit(`У зміні: ${N} ${cyclesWord(N)}${c.countParts ? ` · ${c.parts} деталей` : ''}`, W - 2 * PX), PX, y);
   g.fillStyle = '#8a90a6'; g.font = `600 26px ${UI}`;
   g.fillText(fit(c.last ? `Останній цикл зміни до ${hhmm(c.last.end)} · запас ${dur(c.slack)}` : 'Жоден цикл не вкладається у зміну', W - 2 * PX), PX, y + 46);
   return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
@@ -1564,7 +1589,10 @@ function formChanged(e) {
   render();
 }
 el.form.addEventListener('input', formChanged);
-el.form.addEventListener('change', e => { if (e.target === el.shift || e.target === el.harvestOn) formChanged(e); });
+el.form.addEventListener('change', e => {
+  if (e.target === el.shift || e.target === el.harvestOn || e.target === el.partsOn) formChanged(e);
+  if (e.target === el.partsOn && el.partsOn.checked) { el.parts.focus(); el.parts.select(); }
+});
 el.now.addEventListener('click', () => {
   const d = new Date();
   el.start.value = pad(d.getHours()) + ':' + pad(d.getMinutes());
@@ -1598,6 +1626,13 @@ el.result.addEventListener('click', e => {
   if (b) doAction(b.dataset.act, b);
 });
 el.result.addEventListener('change', e => {
+  if (e.target.id === 'eCountParts') {
+    readEditor();
+    rerender();
+    const f = el.result.querySelector('#eMachines');
+    if (f && !f.disabled) { f.focus(); f.select(); }
+    return;
+  }
   if (e.target.id === 'eShift') {
     readEditor();
     const cu = el.result.querySelector('#eCustom');
