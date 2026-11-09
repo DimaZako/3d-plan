@@ -562,7 +562,7 @@ const el = {
 };
 const state = {
   view: 'form', current: null, shown: null, openedFrom: 'new',
-  editing: null, fixManual: false, dateTouched: false, sig: '', phaseKey: '', alertKey: '', warned: new Set()
+  editing: null, fixManual: false, dateTouched: false, startAuto: true, sig: '', phaseKey: '', alertKey: '', warned: new Set()
 };
 const caps = { share: false };
 
@@ -729,12 +729,19 @@ function saveDraft() {
   lsSet(LS_DRAFT, { name: el.name.value, shift: el.shift.value, shiftStart: el.shiftStart.value, shiftEnd: el.shiftEnd.value,
     start: el.start.value, h: el.h.value, m: el.m.value, harvestOn: el.harvestOn.checked, harvest: el.harvest.value, partsOn: el.partsOn.checked, parts: el.parts.value, machines: el.machines.value });
 }
+/* Print start follows the clock until the person types their own time. */
+function setStartNow() {
+  const d = new Date();
+  el.start.value = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  if (!state.dateTouched) el.date.value = defaultDate();
+}
 function loadDraft() {
   const d = lsGet(LS_DRAFT, null);
+  setStartNow();
   if (!d) return;
   const set = (node, v) => { if (v != null && v !== '') node.value = v; };
   set(el.name, d.name); if (d.shift in SHIFTS || d.shift === 'custom') el.shift.value = d.shift;
-  set(el.shiftStart, d.shiftStart); set(el.shiftEnd, d.shiftEnd); set(el.start, d.start);
+  set(el.shiftStart, d.shiftStart); set(el.shiftEnd, d.shiftEnd);
   set(el.h, d.h); set(el.m, d.m); if (typeof d.harvestOn === 'boolean') el.harvestOn.checked = d.harvestOn;
   set(el.harvest, d.harvest);
   if (typeof d.partsOn === 'boolean') {            // older drafts had no switch: keep the new defaults (off, 0)
@@ -1634,6 +1641,10 @@ async function refreshCloud() {
 function tick() {
   liveAlerts();
   syncWakeLock();
+  if (state.startAuto && state.view === 'form' && document.activeElement !== el.start) {
+    const d = new Date(), now = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    if (el.start.value !== now) { setStartNow(); render(); }
+  }
   if (state.view === 'history' && !el.history.hidden && !el.history.querySelector('.armed')) {
     const m = Math.floor(Date.now() / 60000);
     if (m !== state.histMin) { state.histMin = m; renderHistory(); }
@@ -1661,6 +1672,7 @@ function toast(msg) {
 /* ================= events ================= */
 function formChanged(e) {
   if (e && e.target === el.date) state.dateTouched = true;
+  if (e && e.target === el.start) state.startAuto = false;
   if (e && e.target === el.shift && !state.dateTouched) el.date.value = defaultDate();
   syncFormBits(); saveDraft();
   el.err.hidden = true;
@@ -1673,9 +1685,8 @@ el.form.addEventListener('change', e => {
   if (e.target === el.partsOn && el.partsOn.checked) { el.parts.focus(); el.parts.select(); }
 });
 el.now.addEventListener('click', () => {
-  const d = new Date();
-  el.start.value = pad(d.getHours()) + ':' + pad(d.getMinutes());
-  if (!state.dateTouched) el.date.value = defaultDate();
+  state.startAuto = true;
+  setStartNow();
   formChanged();
 });
 /* No form submission: the published page runs in a sandboxed frame that blocks it. The button and Enter call calculate() directly. */
@@ -1698,7 +1709,7 @@ async function calculate() {
   window.scrollTo(0, 0);
   if (await savePlan(plan)) { haptic('note', 'success'); toast('План збережено в історії'); }
 }
-el.tabNew.addEventListener('click', () => { state.view = 'form'; state.openedFrom = 'new'; state.editing = null; render(); window.scrollTo(0, 0); });
+el.tabNew.addEventListener('click', () => { state.view = 'form'; state.openedFrom = 'new'; state.editing = null; state.startAuto = true; setStartNow(); render(); window.scrollTo(0, 0); });
 el.tabHist.addEventListener('click', () => { state.view = 'history'; state.editing = null; render(); window.scrollTo(0, 0); });
 el.result.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
