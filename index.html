@@ -315,6 +315,17 @@ details.more .parts-box .row2{margin-top:0}
 .tool-btn:hover{border-color:var(--accent)}
 .tool-btn svg{color:var(--accent-ink)}
 .hi.sel{grid-template-columns:minmax(0,1fr);padding-right:4px}
+.hi.ord{grid-template-columns:auto minmax(0,1fr) auto auto;padding-left:2px;position:relative}
+.grip{appearance:none;border:0;background:none;color:var(--muted);width:36px;min-height:56px;padding:0;border-radius:10px;display:grid;place-items:center;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.grip:hover,.grip:focus-visible{color:var(--text);background:var(--surface-2)}
+.hi.ord .hi-open{cursor:default;padding-left:2px;padding-right:2px}
+.hi.ord .iconbtn:disabled{opacity:.3;cursor:default}
+.hi.dragging{z-index:3;border-color:var(--accent);box-shadow:0 14px 34px rgba(0,0,0,.55);background:var(--surface-2)}
+.hi.dragging .grip{cursor:grabbing;color:var(--accent-ink)}
+.hist-list.is-dragging{user-select:none;-webkit-user-select:none}
+.hist-list.is-dragging .hi:not(.dragging){transition:transform .16s ease}
+.reorder-hint{font-size:13px;font-weight:600;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.hist-list.is-dragging .hi:not(.dragging){transition:none}}
 .hi-row{display:flex;align-items:flex-start;gap:12px}
 .hi-body{display:grid;gap:4px;min-width:0}
 .hi-check{flex:none;width:24px;height:24px;margin-top:2px;border-radius:7px;border:2px solid #444a5e;display:grid;place-items:center}
@@ -494,6 +505,10 @@ const JOB_COLORS = ['#8b5cf6', '#4f8cff', '#e06bc4', '#f08a4b', '#3fbf6f'];
 const jobColor = i => JOB_COLORS[i % JOB_COLORS.length];
 
 const IC = {
+  sort: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg>',
+  grip: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.7"/><circle cx="15" cy="6" r="1.7"/><circle cx="9" cy="12" r="1.7"/><circle cx="15" cy="12" r="1.7"/><circle cx="9" cy="18" r="1.7"/><circle cx="15" cy="18" r="1.7"/></svg>',
+  up: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg>',
+  down: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
   sun: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
   moon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
   custom: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
@@ -664,7 +679,7 @@ const el = {
 };
 const state = {
   view: 'form', current: null, shown: null, openedFrom: 'new',
-  editing: null, fixManual: false, dateTouched: false, startAuto: true, menuOpen: false, selecting: null, selected: new Set(), purged: new Set(), sig: '', phaseKey: '', alertKey: '', warned: new Set()
+  editing: null, fixManual: false, dateTouched: false, startAuto: true, menuOpen: false, reordering: false, drag: null, selecting: null, selected: new Set(), purged: new Set(), sig: '', phaseKey: '', alertKey: '', warned: new Set()
 };
 const caps = { share: false };
 
@@ -693,6 +708,7 @@ function syncTg() {
   const nSel = state.selected ? state.selected.size : 0;
   if (state.menuOpen) mode = '';
   else if (state.selecting) { mode = 'delsel'; text = nSel ? `Видалити вибрані (${nSel})` : 'Виберіть плани'; color = nSel ? '#ef5b5b' : '#3a4054'; }
+  else if (state.reordering && state.view === 'tasks') { mode = 'reorder'; text = 'Готово'; }
   else if (state.view === 'form') { mode = 'calc'; text = 'Розрахувати'; }
   else if (state.view === 'result' && state.editing) { mode = 'save'; text = 'Зберегти зміни'; }
   else if (state.view === 'result' && sh && sh.saved && sh.st && sh.st.phase === 'harvest') {
@@ -708,7 +724,7 @@ function syncTg() {
     if (mode) tg.MainButton.setParams({ text, color, text_color: tcolor, is_active: mode !== 'delsel' || nSel > 0, is_visible: true });
     else tg.MainButton.hide();
   } catch {}
-  try { if (tgAt('6.1')) { if (state.view !== 'form' || state.editing || state.menuOpen || state.selecting) tg.BackButton.show(); else tg.BackButton.hide(); } } catch {}
+  try { if (tgAt('6.1')) { if (state.view !== 'form' || state.editing || state.menuOpen || state.selecting || state.reordering) tg.BackButton.show(); else tg.BackButton.hide(); } } catch {}
 }
 function initTg() {
   if (!inTG) return;
@@ -724,6 +740,7 @@ function initTg() {
       else if (state.tgMode === 'save') doAction('ed-save');
       else if (state.tgMode === 'fix') doAction('fix', { dataset: { n: String(state.tgN) } });
       else if (state.tgMode === 'delsel') confirmDeleteSelected();
+      else if (state.tgMode === 'reorder') exitReorder();
     });
   } catch {}
   try {
@@ -731,6 +748,7 @@ function initTg() {
       haptic('select');
       if (state.menuOpen) closeMenu();
       else if (state.selecting) exitSelect();
+      else if (state.reordering) exitReorder();
       else if (state.editing) doAction('ed-cancel');
       else if (state.fixManual) { state.fixManual = false; rerender(); }
       else if (state.view === 'history' || state.view === 'tasks') go('form');
@@ -1614,7 +1632,12 @@ function splitPlans() {
     (now >= planOver(pl, c) ? hist : tasks).push({ pl, c });
   }
   const byNew = (x, y) => (y.pl.createdAt || 0) - (x.pl.createdAt || 0);
-  return { tasks: tasks.sort(byNew), hist: hist.sort(byNew) };
+  const byOrder = (x, y) => {
+    const a = x.pl.pos, b = y.pl.pos;
+    if (a == null || b == null) return a == null && b == null ? byNew(x, y) : a == null ? -1 : 1;
+    return a - b || byNew(x, y);
+  };
+  return { tasks: tasks.sort(byOrder), hist: hist.sort(byNew) };
 }
 /* Timer strip: green while printing, yellow while the restart timer runs, red once it is over. */
 function timerBar(p, c) {
@@ -1631,6 +1654,7 @@ function timerBar(p, c) {
 }
 function setCount(node, n) { node.hidden = !n; node.textContent = n; }
 function renderHistory() {
+  if (state.drag) return;                              // never rebuild the list under a finger
   const { tasks, hist } = splitPlans();
   setCount(el.tasksCount, tasks.length);
   setCount(el.histCount, hist.length);
@@ -1638,24 +1662,37 @@ function renderHistory() {
   const kind = state.view === 'tasks' ? 'tasks' : 'history';
   const items = kind === 'tasks' ? tasks : hist;
   const sel = state.selecting === kind;
+  if (state.reordering && (kind !== 'tasks' || items.length < 2)) state.reordering = false;
+  const ord = kind === 'tasks' && state.reordering;
   if (sel) [...state.selected].forEach(id => { if (!items.some(it => it.pl.id === id)) state.selected.delete(id); });
   const note = `<span class="store-note">${store.mode === 'tg' ? IC.cloud : IC.device}${esc(store.note)}</span>`;
   const title = kind === 'tasks' ? 'Завдання' : 'Історія';
   const sub = kind === 'tasks' ? 'Плани поточної зміни' : `Завершені плани минулих змін · зберігаються ${KEEP_DAYS} днів`;
   const allSel = sel && items.length && state.selected.size === items.length;
-  const tools = !items.length ? '' : sel
+  const tools = !items.length ? '' : ord
+    ? `<div class="list-tools"><span class="reorder-hint">Перетягніть картку за ⠿ або натискайте стрілки</span><button type="button" class="tool-btn tg-dup" data-reorder-done>${IC.check}Готово</button></div>`
+    : sel
     ? `<div class="list-tools"><button type="button" class="tool-btn" data-selall>${allSel ? 'Зняти всі' : 'Вибрати всі'}</button><button type="button" class="tool-btn" data-selcancel>Скасувати</button></div>`
-    : `<div class="list-tools"><button type="button" class="tool-btn" data-select>${IC.checkSm}Вибрати</button>${kind === 'history' ? `<button type="button" class="clear-btn" data-clear>${IC.trash}Очистити історію</button>` : ''}</div>`;
+    : `<div class="list-tools"><button type="button" class="tool-btn" data-select>${IC.checkSm}Вибрати</button>${kind === 'tasks' && items.length > 1 ? `<button type="button" class="tool-btn" data-reorder>${IC.sort}Порядок</button>` : ''}${kind === 'history' ? `<button type="button" class="clear-btn" data-clear>${IC.trash}Очистити історію</button>` : ''}</div>`;
   const empty = store.loading ? 'Завантажую історію з Telegram…'
     : kind === 'tasks' ? 'Немає завдань на цю зміну. Створіть план через меню «Новий план».'
     : `Тут з'являться завершені плани минулих змін. Записи, старші за ${KEEP_DAYS} днів, видаляються автоматично.`;
-  const cards = items.map(({ pl, c }) => {
+  const cards = items.map(({ pl, c }, i) => {
     const j0 = c.jobs[0];
     const endTxt = c.last ? hhmm(c.last.end) : '—';      // last cycle harvested by this shift (before 20:00 / 08:00)
     const body = `<span class="hi-name">${esc(pl.name || j0.name || 'Без назви')}</span>
           <span class="hi-meta">${shiftIcon(c.sh.key)}<span class="hi-end">Час завершення <b>${endTxt}</b></span>${histLive(pl, c)}</span>
           ${kind === 'tasks' ? timerBar(pl, c) : ''}
           <span class="hi-time">${esc(fmtStamp(pl.createdAt))}${pl.updatedAt && pl.updatedAt - pl.createdAt > 60000 ? ' · змінено ' + esc(fmtStamp(pl.updatedAt)) : ''}</span>`;
+    if (ord) {
+      const nm = esc(pl.name || j0.name || 'Без назви'), id = esc(pl.id);
+      return `<li class="hi ord" data-id="${id}">
+        <button type="button" class="grip" data-grip="${id}" aria-label="Перемістити «${nm}», позиція ${i + 1} з ${items.length}. Стрілки вгору й вниз змінюють місце">${IC.grip}</button>
+        <div class="hi-open">${body}</div>
+        <button type="button" class="iconbtn" data-move="${id}" data-dir="-1" aria-label="Перемістити «${nm}» вище"${i ? '' : ' disabled'}>${IC.up}</button>
+        <button type="button" class="iconbtn" data-move="${id}" data-dir="1" aria-label="Перемістити «${nm}» нижче"${i < items.length - 1 ? '' : ' disabled'}>${IC.down}</button>
+      </li>`;
+    }
     if (sel) {
       const on = state.selected.has(pl.id);
       return `<li class="hi sel${on ? ' is-selected' : ''}"><button type="button" class="hi-open" data-pick="${esc(pl.id)}" aria-pressed="${on}"><span class="hi-row"><span class="hi-check" aria-hidden="true"></span><span class="hi-body">${body}</span></span></button></li>`;
@@ -1715,6 +1752,32 @@ function tgAsk(message, onYes) {
     return true;
   } catch { return false; }
 }
+async function writeCloudPlans(plans) {
+  for (const pl of plans) await csCall('setItem', 'p_' + pl.id, JSON.stringify(pl));
+}
+/* Moving tasks: the new place is saved at once. */
+let orderQueue = Promise.resolve();
+function moveTask(id, to, focus) {
+  const ids = splitPlans().tasks.map(it => it.pl.id);
+  const from = ids.indexOf(id);
+  if (from < 0) return;
+  to = Math.max(0, Math.min(ids.length - 1, to));
+  if (to !== from) ids.splice(to, 0, ids.splice(from, 1)[0]);
+  const changed = [];
+  ids.forEach((pid, i) => { const pl = store.plans.find(x => x.id === pid); if (pl && pl.pos !== i) { pl.pos = i; changed.push(pl); } });
+  renderHistory();
+  if (focus) { const f = el.history.querySelector(focus(id)); if (f && !f.disabled) f.focus(); else { const g = el.history.querySelector(`[data-grip="${CSS.escape(id)}"]`); if (g) g.focus(); } }
+  if (!changed.length) return;
+  if (typeof haptic === 'function') haptic('select');
+  orderQueue = orderQueue.then(async () => {
+    try {
+      if (store.mode === 'tg') await writeCloudPlans(changed);
+      else if (store.mode === 'cloud' && store.col) { for (const pl of changed) await store.col.doc(pl.id).set(pl); }
+      else lsSet(LS_PLANS, store.plans);
+    } catch { toast('Не вдалося зберегти порядок. Перевірте зʼєднання.'); }
+  });
+}
+function exitReorder() { state.reordering = false; render(); }
 /* Delete the given plans everywhere they are stored. */
 async function deletePlans(ids, opts = {}) {
   if (!ids.length) return false;
@@ -1782,7 +1845,7 @@ function closeMenu() {
 }
 function go(view) {
   closeMenu();
-  state.selecting = null; state.selected.clear();
+  state.selecting = null; state.selected.clear(); state.reordering = false;
   state.editing = null; state.fixManual = false;
   if (view === 'form') { state.openedFrom = 'new'; state.startAuto = true; setStartNow(); syncAlignInfo(); }
   state.view = view;
@@ -1883,7 +1946,7 @@ function tick() {
     const d = new Date(), now = pad(d.getHours()) + ':' + pad(d.getMinutes());
     if (el.start.value !== now) { setStartNow(); syncAlignInfo(); render(); }
   }
-  if ((state.view === 'history' || state.view === 'tasks') && !el.history.hidden && !el.history.querySelector('.armed')) {
+  if ((state.view === 'history' || state.view === 'tasks') && !el.history.hidden && !state.drag && !el.history.querySelector('.armed')) {
     const m = Math.floor(Date.now() / 60000);
     if (m !== state.histMin) { state.histMin = m; renderHistory(); }
   }
@@ -1975,9 +2038,80 @@ el.result.addEventListener('change', e => {
 el.result.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'fixTime') { e.preventDefault(); const b = el.result.querySelector('[data-act="fix-save"]'); if (b) doAction('fix-save', b); }
 });
+/* Dragging a task by its handle. */
+function dragUpdate() {
+  const d = state.drag; if (!d) return;
+  const dy = d.y - d.y0 + (window.scrollY - d.sy0);
+  d.li.style.transform = `translateY(${dy}px)`;
+  const c = d.mids[d.from] + dy;
+  let to = d.from;
+  for (let i = d.from + 1; i < d.lis.length; i++) if (c > d.mids[i]) to = i;
+  for (let i = d.from - 1; i >= 0; i--) if (c < d.mids[i]) to = i;
+  if (to !== d.to && typeof haptic === 'function') haptic('select');
+  d.to = to;
+  d.lis.forEach((x, i) => {
+    if (x === d.li) return;
+    const t = i > d.from && i <= to ? -d.step : i < d.from && i >= to ? d.step : 0;
+    x.style.transform = t ? `translateY(${t}px)` : '';
+  });
+}
+function dragScroll() {
+  const d = state.drag; if (!d) return;
+  const H = window.innerHeight, edge = 80;
+  const v = d.y < edge ? -Math.ceil((edge - d.y) / 6) : d.y > H - edge ? Math.ceil((d.y - (H - edge)) / 6) : 0;
+  if (v) { const before = window.scrollY; window.scrollBy(0, v); if (window.scrollY !== before) dragUpdate(); }
+  d.raf = requestAnimationFrame(dragScroll);
+}
+el.history.addEventListener('pointerdown', e => {
+  const g = e.target.closest('[data-grip]');
+  if (!g || state.drag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const li = g.closest('.hi'), list = li.parentElement, lis = [...list.children];
+  if (lis.length < 2) return;
+  e.preventDefault();
+  const rects = lis.map(x => x.getBoundingClientRect()), from = lis.indexOf(li);
+  const gap = parseFloat(getComputedStyle(list).rowGap) || 8;
+  state.drag = { id: li.dataset.id, li, list, lis, from, to: from, pid: e.pointerId, y0: e.clientY, y: e.clientY, sy0: window.scrollY,
+    step: rects[from].height + gap, mids: rects.map(r => r.top + r.height / 2) };
+  try { g.setPointerCapture(e.pointerId); } catch {}
+  li.classList.add('dragging'); list.classList.add('is-dragging');
+  if (typeof haptic === 'function') haptic('impact', 'light');
+  state.drag.raf = requestAnimationFrame(dragScroll);
+});
+el.history.addEventListener('pointermove', e => {
+  const d = state.drag; if (!d || e.pointerId !== d.pid) return;
+  e.preventDefault(); d.y = e.clientY; dragUpdate();
+});
+const dragEnd = e => {
+  const d = state.drag; if (!d || e.pointerId !== d.pid) return;
+  cancelAnimationFrame(d.raf);
+  state.drag = null;
+  d.lis.forEach(x => { x.style.transform = ''; });
+  d.li.classList.remove('dragging'); d.list.classList.remove('is-dragging');
+  if (e.type === 'pointerup' && d.to !== d.from) moveTask(d.id, d.to, pid => `[data-grip="${CSS.escape(pid)}"]`);
+  else renderHistory();
+};
+el.history.addEventListener('pointerup', dragEnd);
+el.history.addEventListener('pointercancel', dragEnd);
+el.history.addEventListener('keydown', e => {
+  const g = e.target.closest('[data-grip]');
+  if (!g || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  const id = g.dataset.grip, idx = splitPlans().tasks.findIndex(it => it.pl.id === id);
+  moveTask(id, idx + (e.key === 'ArrowUp' ? -1 : 1), pid => `[data-grip="${CSS.escape(pid)}"]`);
+});
 el.history.addEventListener('click', e => {
   if (e.target.closest('[data-clear]')) { askYesNo('Ви впевнені, що бажаєте очистити історію?', clearHistory); return; }
-  if (e.target.closest('[data-select]')) { state.selecting = state.view; state.selected.clear(); render(); return; }
+  if (e.target.closest('[data-select]')) { state.selecting = state.view; state.selected.clear(); state.reordering = false; render(); return; }
+  if (e.target.closest('[data-reorder]')) { state.reordering = true; state.selecting = null; state.selected.clear(); render(); return; }
+  if (e.target.closest('[data-reorder-done]')) { exitReorder(); return; }
+  const mv = e.target.closest('[data-move]');
+  if (mv) {
+    const id = mv.dataset.move, dir = Number(mv.dataset.dir);
+    const idx = splitPlans().tasks.findIndex(it => it.pl.id === id);
+    moveTask(id, idx + dir, pid => `[data-move="${CSS.escape(pid)}"][data-dir="${dir}"]`);
+    return;
+  }
+  if (e.target.closest('[data-grip]')) return;
   if (e.target.closest('[data-selcancel]')) { exitSelect(); return; }
   if (e.target.closest('[data-selall]')) {
     const ids = (state.view === 'tasks' ? splitPlans().tasks : splitPlans().hist).map(it => it.pl.id);
